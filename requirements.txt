@@ -1,1 +1,16 @@
+# Core dependencies
+fastapi
+uvicorn
+streamlit
+requests
 apscheduler
+feedparser
+
+# Optional dependencies for enhanced features
+# Uncomment to enable OpenAI GPT integration:
+# openai>=1.0.0
+
+# Development dependencies (optional)
+# pytest
+# black
+# flake8
