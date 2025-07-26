@@ -16,3 +16,9 @@ def create_feed(feed: FeedInput):
 @router.get("/")
 def list_feeds():
     return get_all_feeds()
+
+
+@router.delete("/")
+def delete_feed(name: str):
+    from app.services.rss import remove_feed
+    return remove_feed(name)

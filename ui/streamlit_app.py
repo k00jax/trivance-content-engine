@@ -13,18 +13,36 @@ with tabs[0]:
     st.header("📡 Manage RSS Feeds")
     
     with st.form("add_feed"):
-        name = st.text_input("Feed Name")
-        url = st.text_input("Feed URL")
+        if "feed_name" not in st.session_state:
+            st.session_state.feed_name = ""
+        if "feed_url" not in st.session_state:
+            st.session_state.feed_url = ""
+
+        name = st.text_input("Feed Name", key="feed_name")
+        url = st.text_input("Feed URL", key="feed_url")
         submitted = st.form_submit_button("Add Feed")
+
         if submitted and name and url:
             res = requests.post(f"{API_URL}/feeds/", json={"name": name, "url": url})
             st.success(res.json()["message"])
+            st.session_state.feed_name = ""
+            st.session_state.feed_url = ""
+            st.experimental_rerun()
+
 
     st.subheader("Current Feeds")
     res = requests.get(f"{API_URL}/feeds/")
     feeds = res.json()
-    for f in feeds:
-        st.markdown(f"- **{f['name']}** → {f['url']}")
+
+    for i, f in enumerate(feeds):
+        cols = st.columns([5, 1])
+        with cols[0]:
+            st.markdown(f"**{f['name']}** → {f['url']}")
+        with cols[1]:
+            if st.button("🗑 Remove", key=f"remove_{i}"):
+                requests.delete(f"{API_URL}/feeds/", params={"name": f["name"]})
+                st.experimental_rerun()
+
 
 # --- POST GENERATOR TAB ---
 with tabs[1]:

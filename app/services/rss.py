@@ -6,3 +6,8 @@ def add_feed(feed):
 
 def get_all_feeds():
     return feeds_db
+
+def remove_feed(name: str):
+    global feeds_db
+    feeds_db = [f for f in feeds_db if f["name"] != name]
+    return {"message": f"Feed '{name}' removed."}
