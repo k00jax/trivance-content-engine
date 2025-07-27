@@ -32,20 +32,28 @@ def clean_html(text: str) -> str:
     # Remove HTML tags
     text = re.sub(r'<[^>]+>', '', text)
     
-    # Replace common HTML entities
+    # First decode standard HTML entities using html.unescape
+    import html
+    text = html.unescape(text)
+    
+    # Replace additional common HTML entities that might not be caught
     html_entities = {
         '&amp;': '&',
         '&lt;': '<',
         '&gt;': '>',
         '&quot;': '"',
         '&apos;': "'",
-        '&#8217;': "'",
-        '&#8220;': '"',
-        '&#8221;': '"',
-        '&#8230;': '...',
         '&nbsp;': ' ',
         '&mdash;': '—',
-        '&ndash;': '–'
+        '&ndash;': '–',
+        '&#38;': '&',        # Numeric entity for &
+        '&#8212;': '—',      # Numeric entity for em dash
+        '&#8213;': '—',      # Another em dash variant
+        '&#8216;': ''',      # Left single quote
+        '&#8217;': ''',      # Right single quote
+        '&#8220;': '"',      # Left double quote
+        '&#8221;': '"',      # Right double quote
+        '&#8230;': '...',    # Ellipsis
     }
     
     for entity, replacement in html_entities.items():
