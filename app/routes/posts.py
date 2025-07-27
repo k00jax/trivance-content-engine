@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
+from typing import Optional
 from app.services.generator import generate_commentary
 from app.services.posts import save_generated_post, get_all_posts, get_recent_posts
 
@@ -9,12 +10,13 @@ class ArticleInput(BaseModel):
     title: str
     summary: str
     source: str
-    link: str
+    link: str = ""
+    post_style: Optional[str] = "consultative"
 
 @router.post("/generate")
 def generate_post(article: ArticleInput):
-    # Generate the content
-    result = generate_commentary(article)
+    # Generate the content with style parameter
+    result = generate_commentary(article, post_style=article.post_style)
     
     # Save the generated post to persistent storage
     if "post" in result:

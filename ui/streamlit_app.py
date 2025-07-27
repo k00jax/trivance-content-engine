@@ -177,20 +177,32 @@ with tabs[1]:
         
         with col1:
             include_hashtags = st.checkbox("🏷️ Include hashtags", value=True)
-            post_style = st.selectbox("✍️ Post Style", 
-                ["Consultative (default)", "Educational", "Strategic"], 
-                help="Different styles for various content types"
+            
+            # Map display names to actual style keys
+            style_options = {
+                "Consultative (strategic, frameworks)": "consultative",
+                "Punchy (short, bold claims)": "punchy", 
+                "Casual (friendly, conversational)": "casual"
+            }
+            
+            selected_style_display = st.selectbox("✍️ Post Style", 
+                list(style_options.keys()),
+                help="Different writing styles for various content approaches"
             )
+            
+            post_style = style_options[selected_style_display]
         
         with col2:
             if st.button("🚀 Generate Post", type="primary", use_container_width=True):
                 try:
                     with st.spinner("🧠 Generating Trivance-aligned content..."):
+                        # Include post_style in the API request
                         res = requests.post(f"{API_URL}/posts/generate", json={
                             "title": article.get("title", ""),
                             "summary": article.get("summary", ""),
                             "source": article.get("source_feed", "RSS Feed"),
-                            "link": article.get("link", "")
+                            "link": article.get("link", ""),
+                            "post_style": post_style
                         })
                         res.raise_for_status()
                         result = res.json()
@@ -208,11 +220,21 @@ with tabs[1]:
                         
                         # Additional info
                         with st.expander("ℹ️ Generation Details"):
-                            st.json({
+                            generation_details = {
                                 "method": result.get("method", "unknown"),
+                                "style_used": result.get("style_used", "unknown"),
                                 "hashtags": result.get("hashtags", "none"),
                                 "article_score": article.get("score", 0)
-                            })
+                            }
+                            
+                            # Show key insights if available
+                            if result.get("key_insights"):
+                                generation_details["key_insights"] = result["key_insights"]
+                            
+                            if result.get("specific_detail"):
+                                generation_details["specific_detail_used"] = result["specific_detail"][:100] + "..."
+                            
+                            st.json(generation_details)
                         
                         # Clear selection for next generation
                         if st.button("🔄 Generate Another Post"):
@@ -236,6 +258,20 @@ with tabs[1]:
             manual_summary = st.text_area("Summary")
             manual_source = st.text_input("Source")
             manual_link = st.text_input("Link (optional)")
+            
+            # Add style selection for manual entry too
+            manual_style_options = {
+                "Consultative (strategic, frameworks)": "consultative",
+                "Punchy (short, bold claims)": "punchy", 
+                "Casual (friendly, conversational)": "casual"
+            }
+            
+            manual_style_display = st.selectbox("Post Style", 
+                list(manual_style_options.keys()),
+                help="Writing style for the generated content"
+            )
+            
+            manual_post_style = manual_style_options[manual_style_display]
             manual_generate = st.form_submit_button("Generate from Manual Input")
         
         if manual_generate and manual_title and manual_summary and manual_source:
@@ -244,13 +280,24 @@ with tabs[1]:
                     "title": manual_title,
                     "summary": manual_summary,
                     "source": manual_source,
-                    "link": manual_link
+                    "link": manual_link,
+                    "post_style": manual_post_style
                 })
                 res.raise_for_status()
                 result = res.json()
                 st.subheader("💬 Generated Post (Manual)")
                 st.code(result["post"], language="markdown")
                 st.success("✅ Post generated from manual input!")
+                
+                # Show generation details for manual entry too
+                with st.expander("ℹ️ Manual Generation Details"):
+                    st.json({
+                        "method": result.get("method", "unknown"),
+                        "style_used": result.get("style_used", "unknown"),
+                        "key_insights": result.get("key_insights", []),
+                        "specific_detail_used": result.get("specific_detail", "None")[:100] + "..." if result.get("specific_detail") else "None"
+                    })
+                    
             except requests.RequestException as e:
                 st.error(f"Error generating post: {e}")
 

@@ -1,11 +1,68 @@
 import os
-from typing import Dict, Any
+import re
+from typing import Dict, Any, Optional
 
 # Configuration for future GPT integration
 USE_GPT = os.getenv("USE_OPENAI_GPT", "false").lower() == "true"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-def generate_hashtags(title, summary):
+# Style definitions for different post tones
+STYLE_EXAMPLES = {
+    "consultative": {
+        "description": "Clear, strategic, uses insight and frameworks",
+        "sentence_style": "Balanced length, professional",
+        "example_phrases": ["strategic insight", "framework for", "execution matters", "smart businesses focus"]
+    },
+    "punchy": {
+        "description": "Short sentences, bold claims, scroll-stopping style",
+        "sentence_style": "Short, punchy, direct",
+        "example_phrases": ["Here's the truth:", "Stop doing this:", "The real secret:", "Most teams miss this:"]
+    },
+    "casual": {
+        "description": "Friendly, informal, uses analogies and accessible language",
+        "sentence_style": "Conversational, uses contractions",
+        "example_phrases": ["Think of it this way:", "Here's what's wild:", "You know what I've noticed?", "It's like this:"]
+    }
+}
+
+def extract_key_insights(summary: str, max_insights: int = 3) -> list:
+    """
+    Extract key insights, stats, or quotes from the article summary.
+    Returns a list of the most important pieces of information.
+    """
+    if not summary:
+        return []
+    
+    insights = []
+    
+    # Look for numbers/statistics
+    stat_pattern = r'\b\d+(?:\.\d+)?%|\b\d+(?:,\d{3})*(?:\.\d+)?\s*(?:million|billion|thousand|percent|%)\b'
+    stats = re.findall(stat_pattern, summary.lower())
+    insights.extend([f"Key stat: {stat}" for stat in stats[:2]])
+    
+    # Look for quotes (text in quotes)
+    quote_pattern = r'"([^"]+)"'
+    quotes = re.findall(quote_pattern, summary)
+    insights.extend([f"Quote: \"{quote}\"" for quote in quotes[:1]])
+    
+    # Extract key phrases (sentences with important keywords)
+    important_keywords = [
+        'shows', 'reveals', 'found', 'discovered', 'study', 'research', 'report',
+        'increased', 'decreased', 'improved', 'reduced', 'growth', 'decline',
+        'announced', 'launched', 'released', 'introduced'
+    ]
+    
+    sentences = summary.split('.')
+    for sentence in sentences[:5]:  # Check first 5 sentences
+        sentence = sentence.strip()
+        if any(keyword in sentence.lower() for keyword in important_keywords) and len(sentence) > 20:
+            insights.append(f"Key finding: {sentence}")
+            if len(insights) >= max_insights:
+                break
+    
+    return insights[:max_insights]
+
+def generate_hashtags(title: str, summary: str) -> str:
     """
     Generate 5-7 relevant hashtags based on article title and summary.
     Returns a string of hashtags for LinkedIn posts.
@@ -38,7 +95,11 @@ def generate_hashtags(title, summary):
         "technology": "#Tech",
         "operations": "#Operations",
         "workflow": "#Workflow",
-        "process": "#ProcessImprovement"
+        "process": "#ProcessImprovement",
+        "executive": "#Leadership",
+        "ceo": "#Leadership",
+        "growth": "#Growth",
+        "scale": "#Scaling"
     }
     
     for keyword, hashtag in keyword_hashtag_map.items():
@@ -50,10 +111,9 @@ def generate_hashtags(title, summary):
     
     return " ".join(all_tags)
 
-def generate_with_openai(article) -> Dict[str, Any]:
+def generate_with_openai(article, post_style: str = "consultative") -> Dict[str, Any]:
     """
-    Generate content using OpenAI GPT API.
-    Requires OPENAI_API_KEY environment variable.
+    Generate content using OpenAI GPT API with proper style control.
     """
     try:
         import openai
@@ -63,10 +123,20 @@ def generate_with_openai(article) -> Dict[str, Any]:
         
         openai.api_key = OPENAI_API_KEY
         
+        # Get style information
+        style_info = STYLE_EXAMPLES.get(post_style, STYLE_EXAMPLES["consultative"])
+        key_insights = extract_key_insights(article.summary)
+        
         prompt = f"""
-You are a content writer for Trivance AI — a consultancy that helps small and mid-sized businesses adopt AI using logic, language, and systems. 
+You are a strategic content writer at Trivance AI — a consultancy that helps small and mid-sized businesses adopt AI through logic, language, and systems.
 
-Generate a ~175-word LinkedIn post using this article as inspiration — but do **not** repeat its summary. Instead, draw insights from it and layer in Trivance's perspective.
+Write a ~175-word LinkedIn post based on the article below.
+
+Your post must:
+- Hook readers with a sharp, strategic statement
+- Include at least **one clear idea, fact, or detail** from the article summary
+- Reflect the Trivance perspective: execution > hype
+- End with a soft CTA + 5-7 relevant hashtags
 
 Example Trivance Post:
 Welcome to Trivance AI — your strategic partner for AI clarity and execution.
@@ -82,46 +152,64 @@ Whether you're:
 Our approach is grounded in ⬩ logic ⬩ language ⬩ systems — not buzzwords or overpromised solutions.
 We bring structure and strategy to the table, so you can move fast and confidently.
 
-Now, write a new post in the same tone using:
+Tone Style: {post_style}
+Style Guidelines: {style_info["description"]}
+Sentence Style: {style_info["sentence_style"]}
 
+CRITICAL: Include at least one specific detail from the summary below. Do not generalize — anchor your insight in the actual content.
+
+Article Input:
 - Title: {article.title}
 - Summary: {article.summary}
 - Source: {article.source}
 - Link: {article.link}
 
-Structure:
-- Bold, engaging first sentence (insight or hook)
-- A strategic insight or takeaway (1–2 sentences)
-- Optional nod to SMBs or operational clarity
-- Soft call-to-action or invitation
-- 5–7 relevant hashtags
-
-Tone:
-- Clear, consultative, no buzzwords
-- Sharp, not salesy
-- Grounded in execution
+Key insights to potentially reference: {key_insights}
 
 Return clean, final LinkedIn-ready text (including hashtags at the bottom).
 """
         
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are a professional content writer for Trivance AI, skilled at creating engaging LinkedIn posts with a consultative, no-nonsense tone."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=400,
-            temperature=0.7
-        )
+        # Use newer OpenAI API format
+        try:
+            # Try new API first
+            from openai import OpenAI
+            client = OpenAI(api_key=OPENAI_API_KEY)
+            
+            response = client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": f"You are a professional content writer for Trivance AI, skilled at creating engaging LinkedIn posts with a {post_style} tone that incorporates specific details from article content."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=400,
+                temperature=0.7
+            )
+            
+            generated_content = response.choices[0].message.content.strip()
+            
+        except (ImportError, AttributeError):
+            # Fallback to old API format
+            response = openai.ChatCompletion.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": f"You are a professional content writer for Trivance AI, skilled at creating engaging LinkedIn posts with a {post_style} tone."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=400,
+                temperature=0.7
+            )
+            
+            generated_content = response.choices[0].message.content.strip()
         
-        generated_content = response.choices[0].message.content.strip()
         hashtags = generate_hashtags(article.title, article.summary)
         
         return {
             "post": generated_content,
             "method": "openai_gpt",
             "hashtags": hashtags,
-            "prompt_used": prompt
+            "prompt_used": prompt,
+            "style_used": post_style,
+            "key_insights": key_insights
         }
         
     except ImportError:
@@ -135,54 +223,127 @@ Return clean, final LinkedIn-ready text (including hashtags at the bottom).
             "fallback": True
         }
 
-def generate_template_based(article) -> Dict[str, Any]:
+def generate_template_based(article, post_style: str = "consultative") -> Dict[str, Any]:
     """
-    Generate content using template-based approach.
-    Fallback method when GPT is not available or configured.
+    Generate content using template-based approach with style control.
+    Uses actual article content and applies proper style formatting.
     """
     hashtags = generate_hashtags(article.title, article.summary)
+    key_insights = extract_key_insights(article.summary)
+    style_info = STYLE_EXAMPLES.get(post_style, STYLE_EXAMPLES["consultative"])
     
-    # Template variations for more dynamic content
-    templates = [
-        {
-            "hook": "🎯 {title} — but here's what most teams miss:",
-            "insight": "The real opportunity isn't in the latest AI breakthrough. It's in identifying where your current processes break down and applying the right AI tool to fix them.",
-            "body": """Most small to mid-sized businesses don't need an AI transformation. They need:
-✦ Clear frameworks for where AI actually helps
-✦ Practical training that sticks with their team
-✦ Systems that work without constant maintenance"""
-        },
-        {
-            "hook": "💡 {title} — and it reveals something important:",
-            "insight": "Every AI success story starts with the same foundation: understanding your current workflow before adding any automation.",
-            "body": """At Trivance AI, we see this pattern repeatedly:
-✦ Companies rush to implement AI without mapping their processes
-✦ Teams get overwhelmed by tools that don't fit their workflow
-✦ Results fall short because the foundation wasn't solid"""
-        },
-        {
-            "hook": "⚡ {title} — here's the strategic takeaway:",
-            "insight": "The best AI implementations aren't about replacing humans. They're about amplifying what your team already does well.",
-            "body": """Smart businesses focus on:
-✦ Identifying repetitive tasks that drain energy
-✦ Training teams on practical AI applications
-✦ Building systems that scale without complexity"""
-        }
-    ]
+    # Extract a specific detail from the summary to include
+    specific_detail = ""
+    if key_insights:
+        specific_detail = key_insights[0].replace("Key stat: ", "").replace("Key finding: ", "").replace("Quote: ", "")
+    elif article.summary:
+        # Fallback: use first meaningful sentence from summary
+        sentences = [s.strip() for s in article.summary.split('.') if len(s.strip()) > 20]
+        if sentences:
+            specific_detail = sentences[0]
     
-    # Simple rotation based on title length (pseudo-random)
+    # Style-specific templates
+    if post_style == "punchy":
+        templates = [
+            {
+                "hook": "🚨 {title}.",
+                "insight": "Here's what everyone's missing: {detail}",
+                "body": """The playbook is simple:
+• Map your current workflow
+• Find the bottlenecks  
+• Apply AI precisely where it matters
+
+Stop chasing shiny tools. Start fixing real problems.""",
+                "cta": "Ready to cut through the noise?"
+            },
+            {
+                "hook": "💥 {title}.",
+                "insight": "The truth? {detail}",
+                "body": """Most teams get this backwards:
+• They buy AI tools first
+• Then figure out what to do with them
+• Wonder why results disappoint
+
+Smart approach: Problems first. Tools second.""",
+                "cta": "Time to flip the script?"
+            }
+        ]
+    
+    elif post_style == "casual":
+        templates = [
+            {
+                "hook": "📰 Just read this: {title}",
+                "insight": "Here's what caught my attention: {detail}",
+                "body": """You know what I love about this? It's exactly what we see with our clients.
+
+The companies that succeed with AI aren't the ones with the biggest budgets. They're the ones who:
+• Start with clear problems
+• Test small and learn fast  
+• Focus on their team's actual workflows
+
+It's not rocket science, but it works.""",
+                "cta": "What's your take on this?"
+            },
+            {
+                "hook": "� Interesting perspective: {title}",
+                "insight": "This resonates: {detail}",
+                "body": """Think of it this way — AI is like hiring a really smart intern.
+
+You wouldn't just give them access to everything and say "figure it out." You'd:
+• Show them your current process
+• Give them specific tasks to improve
+• Check their work and iterate
+
+Same principle applies to AI tools.""",
+                "cta": "Makes sense, right?"
+            }
+        ]
+    
+    else:  # consultative (default)
+        templates = [
+            {
+                "hook": "🎯 {title} — here's the strategic insight:",
+                "insight": "The key finding: {detail}",
+                "body": """This aligns with what we see across SMBs implementing AI successfully.
+
+The pattern is consistent:
+✦ They start with process mapping, not tool shopping
+✦ They focus on high-impact, low-complexity wins first
+✦ They invest in team training alongside technology
+
+At Trivance AI, we call this ⬩ logic ⬩ language ⬩ systems — because sustainable AI adoption requires all three.""",
+                "cta": "Ready to build your AI strategy on solid foundations?"
+            },
+            {
+                "hook": "📊 {title} — and the implications are clear:",
+                "insight": "Consider this: {detail}",
+                "body": """Smart businesses recognize that AI implementation isn't about replacing humans — it's about amplifying human capabilities.
+
+The framework that works:
+✦ Identify repetitive tasks that drain team energy
+✦ Map existing workflows before adding automation
+✦ Choose tools that integrate with current systems
+
+This isn't about transformation. It's about intelligent optimization.""",
+                "cta": "What's your next optimization opportunity?"
+            }
+        ]
+    
+    # Select template based on title length for variation
     template_index = len(article.title) % len(templates)
     template = templates[template_index]
     
-    post_content = f"""{template["hook"].format(title=article.title)}
+    # Build the post content
+    hook = template["hook"].format(title=article.title)
+    insight = template["insight"].format(detail=specific_detail[:100] + "..." if len(specific_detail) > 100 else specific_detail)
+    
+    post_content = f"""{hook}
 
-{template["insight"]}
+{insight}
 
 {template["body"]}
 
-At Trivance AI, we focus on ⬩ logic ⬩ language ⬩ systems — helping you cut through the noise and build solutions that actually work.
-
-Ready to move beyond the hype and into execution?
+{template["cta"]}
 
 Source: {article.source}
 {article.link if article.link else ''}
@@ -193,28 +354,44 @@ Source: {article.source}
         "post": post_content.strip(),
         "method": "template_based",
         "hashtags": hashtags,
-        "template_used": template_index
+        "template_used": template_index,
+        "style_used": post_style,
+        "key_insights": key_insights,
+        "specific_detail": specific_detail
     }
 
-def generate_commentary(article):
+def generate_commentary(article, post_style: str = "consultative"):
     """
     Generate Trivance AI-aligned LinkedIn content using the article as inspiration.
+    
+    Args:
+        article: Article object with title, summary, source, link
+        post_style: Style of the post ("consultative", "punchy", "casual")
     
     Uses OpenAI GPT if configured (USE_OPENAI_GPT=true and OPENAI_API_KEY set),
     otherwise falls back to template-based generation.
     """
     
+    # Validate post_style
+    if post_style not in STYLE_EXAMPLES:
+        post_style = "consultative"
+    
     if USE_GPT and OPENAI_API_KEY:
-        result = generate_with_openai(article)
+        result = generate_with_openai(article, post_style)
         
         # If GPT generation failed, fall back to template
         if result.get("fallback") or result.get("error"):
             print(f"GPT generation failed: {result.get('error', 'Unknown error')}")
             print("Falling back to template-based generation...")
-            return generate_template_based(article)
+            return generate_template_based(article, post_style)
         
         return result
     
     else:
         # Use template-based generation
-        return generate_template_based(article)
+        return generate_template_based(article, post_style)
+
+# Utility function to get available styles
+def get_available_styles() -> Dict[str, str]:
+    """Return available post styles with descriptions."""
+    return {style: info["description"] for style, info in STYLE_EXAMPLES.items()}

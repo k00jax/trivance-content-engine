@@ -64,13 +64,57 @@ The system automatically generates relevant hashtags based on:
 - Industry-specific tags (#ChatGPT, #Automation, #Strategy, etc.)
 - Maximum of 7 hashtags per post
 
-## Post Structure
+## Post Generation Styles
 
-All generated posts follow this structure:
-1. **Hook:** Bold, engaging first sentence with article title
-2. **Insight:** Strategic takeaway relevant to SMBs
-3. **Framework:** Bulleted list of actionable points
-4. **Brand Voice:** Trivance AI positioning statement
-5. **CTA:** Soft call-to-action
-6. **Attribution:** Source and link
-7. **Hashtags:** 5-7 relevant tags
+The enhanced content generator now supports three distinct writing styles:
+
+### Available Styles
+
+**Consultative (Default)**
+- Clear, strategic tone with frameworks
+- Balanced sentence length, professional
+- Uses insights and structured approaches
+- Best for: Strategic insights, business analysis
+
+**Punchy**
+- Short sentences, bold claims
+- Scroll-stopping, direct style
+- Attention-grabbing hooks
+- Best for: Viral content, strong opinions
+
+**Casual** 
+- Friendly, conversational tone
+- Uses analogies and accessible language
+- Informal, uses contractions
+- Best for: Relatable content, explanations
+
+### Content Accuracy Features
+
+**Key Insights Extraction**:
+- Automatically identifies statistics (85%, $1M, etc.)
+- Extracts quotes from article summaries
+- Finds key findings and research results
+- Ensures specific details are included in posts
+
+**Article Content Integration**:
+- Posts now reference actual article data
+- Include at least one specific fact or quote
+- Avoid generic generalizations
+- Anchor insights in real content
+
+### Style Examples
+
+**Consultative Example**:
+> "📊 AI adoption grows 40% — here's the strategic insight:
+> Consider this: 78% of successful implementations start with process mapping.
+> The framework that works: ✦ Map workflows ✦ Identify bottlenecks ✦ Apply AI precisely"
+
+**Punchy Example**:
+> "🚨 AI adoption grows 40%.
+> Here's what everyone's missing: Most teams buy tools first, ask questions later.
+> Stop. Problems first. Tools second."
+
+**Casual Example**:
+> "💭 Interesting take: AI adoption grows 40%
+> You know what I love about this? It's exactly what we see with our clients.
+> Think of AI like hiring a smart intern..."

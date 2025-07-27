@@ -38,7 +38,7 @@ Higher scores indicate better fit for Trivance AI's SMB-focused content strategy
 
 ## Content Generation
 
-The app includes sophisticated content generation with two modes:
+The app includes sophisticated content generation with two modes and three styles:
 
 **Template-Based (Default)**:
 - Multiple dynamic templates with Trivance AI voice
@@ -52,12 +52,16 @@ The app includes sophisticated content generation with two modes:
 - Natural language variation
 - Requires OpenAI API key
 
-### Content Features
-- 🎯 Trivance AI brand voice and messaging
-- 📊 Automatic hashtag generation (5-7 tags)
-- ✨ Multiple template variations for variety
-- 🎪 LinkedIn-optimized formatting
-- 📈 SMB-focused insights and perspectives
+### Content Styles
+- 🎯 **Consultative**: Strategic, framework-based, professional tone
+- ⚡ **Punchy**: Short sentences, bold claims, scroll-stopping style  
+- 💬 **Casual**: Friendly, conversational, uses analogies
+
+### Enhanced Features
+- 📊 **Content Accuracy**: Posts now include specific facts, stats, and quotes from articles
+- 🔍 **Key Insights**: Automatic extraction of important data points
+- 🎪 **Style Control**: Three distinct writing styles for different content approaches
+- 📈 **SMB Focus**: All content aligned with small business AI strategy
 
 ## Data Persistence
 
