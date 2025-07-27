@@ -8,6 +8,13 @@ from .persistence import save_json, load_json
 # Load feeds from persistent storage on startup
 feeds_db = load_json("feeds.json", [])
 
+def get_feed_name_by_url(url: str) -> Optional[str]:
+    """Get the feed name by URL from the feeds database."""
+    for feed in feeds_db:
+        if feed["url"] == url:
+            return feed["name"]
+    return None
+
 # Configuration for content enhancement
 CONTENT_ENHANCEMENT_CONFIG = {
     "enabled": True,  # Set to False to disable content extraction
@@ -250,7 +257,7 @@ def score_article(title: str, summary: str) -> int:
 def fetch_articles_from_feed(feed_url: str, limit: int = 10) -> List[Dict]:
     """
     Fetch articles from a single RSS feed using feedparser.
-    Returns list of articles with title, enhanced summary, link, published, and score.
+    Returns list of articles with title, enhanced summary, link, published, score, and source.
     """
     try:
         # Set user agent to avoid blocking
@@ -260,6 +267,10 @@ def fetch_articles_from_feed(feed_url: str, limit: int = 10) -> List[Dict]:
         
         if not feed.entries:
             return []
+
+        # Get the feed name for source attribution
+        feed_name = get_feed_name_by_url(feed_url)
+        source = feed_name or "RSS Feeds"  # ✅ Fallback if name not found
         
         articles = []
         for entry in feed.entries[:limit]:
@@ -286,6 +297,7 @@ def fetch_articles_from_feed(feed_url: str, limit: int = 10) -> List[Dict]:
                 "link": link,
                 "published": published,
                 "score": score,
+                "source": source,  # ✅ Add the feed's name as source
                 "word_count": len(enhanced_summary.split()),
                 "enhanced": len(enhanced_summary) > 200  # Flag if we got enhanced content
             })
@@ -310,9 +322,9 @@ def get_top_article_from_all_feeds(max_age_days: int = 7) -> Optional[Dict]:
     for feed in feeds_db:
         feed_articles = fetch_articles_from_feed(feed["url"], limit=5)
         
-        # Add source feed info and filter by date if needed
+        # Add additional feed metadata (source is already included from fetch_articles_from_feed)
         for article in feed_articles:
-            article["source_feed"] = feed["name"]
+            article["source_feed"] = feed["name"]  # Keep for backward compatibility
             article["source_url"] = feed["url"]
             
             # Optional: filter by date (requires parsing published date)
@@ -336,9 +348,11 @@ def get_articles_by_feed_name(feed_name: str, limit: int = 10) -> List[Dict]:
     
     articles = fetch_articles_from_feed(feed["url"], limit)
     
-    # Add source feed info
+    # Add additional feed metadata (source is already included from fetch_articles_from_feed)
     for article in articles:
-        article["source_feed"] = feed_name
+        article["source_feed"] = feed_name  # Keep for backward compatibility
         article["source_url"] = feed["url"]
+    
+    return articles
     
     return articles

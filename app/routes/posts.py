@@ -12,7 +12,7 @@ router = APIRouter()
 class ArticleInput(BaseModel):
     title: str = Field(..., min_length=5, description="Article title")
     summary: str = Field(..., min_length=20, description="Article summary or content")
-    source: str = Field(default="RSS Feed", description="Source publication")
+    source: str = Field(default="RSS Feeds", description="Source publication")
     link: str = Field(default="", description="Link to original article")
     post_style: Optional[str] = Field(default="consultative", description="Writing style")
     platform: Optional[str] = Field(default="LinkedIn", description="Target platform")
@@ -28,8 +28,8 @@ class ArticleInput(BaseModel):
         if 'style' in data and not data.get('post_style'):
             data['post_style'] = data.get('style', 'consultative')
         # Ensure source has a value
-        if not data.get('source'):
-            data['source'] = "RSS Feed"
+        if not data.get('source') or not data.get('source').strip():
+            data['source'] = "RSS Feeds"
         super().__init__(**data)
 
 class HashtagInput(BaseModel):
@@ -63,6 +63,7 @@ def generate_post(article: ArticleInput):
     try:
         # Log the received data for debugging
         print(f"Received article data: title='{article.title}', source='{article.source}', style='{article.post_style}'")
+        print(f"Using article source: {article.source}")  # ✅ Debug echo for source
         
         # Generate content with style parameter
         result = generate_commentary(article, post_style=article.post_style)

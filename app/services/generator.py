@@ -1,397 +1,265 @@
 import os
 import re
+import time
 from typing import Dict, Any, Optional
 
-# Configuration for future GPT integration
+# Import content vault for storing successful generations
+try:
+    from .content_vault import content_vault
+except ImportError:
+    content_vault = None
+
 USE_GPT = os.getenv("USE_OPENAI_GPT", "false").lower() == "true"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Style definitions for different post tones
 STYLE_EXAMPLES = {
-    "consultative": {
-        "description": "Clear, strategic, uses insight and frameworks",
-        "sentence_style": "Balanced length, professional",
-        "example_phrases": ["strategic insight", "framework for", "execution matters", "smart businesses focus"]
+    "trivance_default": {
+        "description": "Professional, clear, consultative, and educational",
+        "sentence_style": "Balanced and strategic, avoids fluff",
+        "example_phrases": [
+            "Strategic insight",
+            "Execution > hype",
+            "Mapped workflows",
+            "Smart systems",
+            "Clear frameworks"
+        ]
     },
     "punchy": {
-        "description": "Short sentences, bold claims, scroll-stopping style",
-        "sentence_style": "Short, punchy, direct",
-        "example_phrases": ["Here's the truth:", "Stop doing this:", "The real secret:", "Most teams miss this:"]
+        "description": "Short, bold, scroll-stopping",
+        "sentence_style": "One-liners, hooks, shock and clarity",
+        "example_phrases": ["Here's the truth:", "Stop doing this:", "What most miss:"]
     },
     "casual": {
-        "description": "Friendly, informal, uses analogies and accessible language",
-        "sentence_style": "Conversational, uses contractions",
-        "example_phrases": ["Think of it this way:", "Here's what's wild:", "You know what I've noticed?", "It's like this:"]
+        "description": "Friendly, analogy-driven, accessible",
+        "sentence_style": "Conversational, uses metaphors",
+        "example_phrases": ["Think of it this way:", "It's like this:", "You know what I've noticed?"]
     }
 }
 
 def extract_key_insights(summary: str, max_insights: int = 3) -> list:
-    """
-    Extract key insights, stats, or quotes from the article summary.
-    Returns a list of the most important pieces of information.
-    """
     if not summary:
         return []
     
     insights = []
-    
-    # Look for numbers/statistics
     stat_pattern = r'\b\d+(?:\.\d+)?%|\b\d+(?:,\d{3})*(?:\.\d+)?\s*(?:million|billion|thousand|percent|%)\b'
+    quotes = re.findall(r'"([^"]+)"', summary)
     stats = re.findall(stat_pattern, summary.lower())
-    insights.extend([f"Key stat: {stat}" for stat in stats[:2]])
-    
-    # Look for quotes (text in quotes)
-    quote_pattern = r'"([^"]+)"'
-    quotes = re.findall(quote_pattern, summary)
-    insights.extend([f"Quote: \"{quote}\"" for quote in quotes[:1]])
-    
-    # Extract key phrases (sentences with important keywords)
+    insights += [f"Stat: {stat}" for stat in stats[:2]]
+    insights += [f"Quote: {quote}" for quote in quotes[:1]]
+
     important_keywords = [
-        'shows', 'reveals', 'found', 'discovered', 'study', 'research', 'report',
-        'increased', 'decreased', 'improved', 'reduced', 'growth', 'decline',
-        'announced', 'launched', 'released', 'introduced'
+        'reveals', 'found', 'discovered', 'study', 'research', 'announced',
+        'launched', 'released', 'introduced', 'accelerated', 'resistance', 'compliance'
     ]
-    
-    sentences = summary.split('.')
-    for sentence in sentences[:5]:  # Check first 5 sentences
-        sentence = sentence.strip()
-        if any(keyword in sentence.lower() for keyword in important_keywords) and len(sentence) > 20:
-            insights.append(f"Key finding: {sentence}")
-            if len(insights) >= max_insights:
-                break
-    
+    for sentence in summary.split('.')[:6]:
+        if any(k in sentence.lower() for k in important_keywords):
+            insights.append(f"Finding: {sentence.strip()}")
+        if len(insights) >= max_insights:
+            break
+
     return insights[:max_insights]
 
-def generate_hashtags(title: str, summary: str) -> str:
-    """
-    Generate 5-7 relevant hashtags based on article title and summary.
-    Returns a string of hashtags for LinkedIn posts.
-    """
-    # Common Trivance AI hashtags
+def generate_hashtags(text: str) -> str:
     base_tags = ["#AI", "#TrivanceAI", "#SmallBusiness"]
-    
-    # Content-based hashtags (simple keyword matching for now)
-    content_tags = []
-    
-    combined_text = f"{title} {summary}".lower()
-    
-    # Map keywords to hashtags
-    keyword_hashtag_map = {
-        "chatgpt": "#ChatGPT",
-        "gpt": "#GPT",
-        "openai": "#OpenAI",
-        "automation": "#Automation",
-        "efficiency": "#Efficiency",
-        "productivity": "#Productivity",
-        "machine learning": "#MachineLearning",
-        "ml": "#MachineLearning",
-        "data": "#DataScience",
-        "analytics": "#Analytics",
-        "startup": "#Startup",
-        "entrepreneur": "#Entrepreneur",
-        "business": "#Business",
-        "strategy": "#Strategy",
-        "innovation": "#Innovation",
-        "technology": "#Tech",
-        "operations": "#Operations",
-        "workflow": "#Workflow",
-        "process": "#ProcessImprovement",
-        "executive": "#Leadership",
-        "ceo": "#Leadership",
-        "growth": "#Growth",
-        "scale": "#Scaling"
+    topics = {
+        "chatgpt": "#ChatGPT", "gpt": "#GPT", "automation": "#Automation",
+        "startup": "#Startup", "efficiency": "#Efficiency", "scale": "#Scaling",
+        "leadership": "#Leadership", "compliance": "#AIGovernance"
     }
-    
-    for keyword, hashtag in keyword_hashtag_map.items():
-        if keyword in combined_text and hashtag not in content_tags:
-            content_tags.append(hashtag)
-    
-    # Combine base tags with content tags, limit to 7 total
-    all_tags = base_tags + content_tags[:4]  # Max 4 content tags + 3 base tags = 7
-    
-    return " ".join(all_tags)
+    text = text.lower()
+    dynamic = [h for k, h in topics.items() if k in text]
+    return " ".join(list(dict.fromkeys(base_tags + dynamic))[:7])
 
-def generate_with_openai(article, post_style: str = "consultative") -> Dict[str, Any]:
-    """
-    Generate content using OpenAI GPT API with proper style control.
-    """
+def generate_with_openai(article, post_style="trivance_default", platform="LinkedIn") -> Dict[str, Any]:
     try:
         import openai
-        
+
         if not OPENAI_API_KEY:
-            raise ValueError("OPENAI_API_KEY environment variable not set")
+            return {
+                "error": "Missing OPENAI_API_KEY",
+                "fallback": True
+            }
+
+        client = openai.OpenAI(api_key=OPENAI_API_KEY)
+        style = STYLE_EXAMPLES.get(post_style, STYLE_EXAMPLES["trivance_default"])
+        source = article.source.strip() or "RSS Feeds"
+        insights = extract_key_insights(article.summary)
         
-        openai.api_key = OPENAI_API_KEY
-        
-        # Get style information
-        style_info = STYLE_EXAMPLES.get(post_style, STYLE_EXAMPLES["consultative"])
-        key_insights = extract_key_insights(article.summary)
-        
+        platform_note = {
+            "LinkedIn": "Include hashtags at the end.",
+            "Email": "No hashtags. Use subject line style tone.",
+            "X": "Post must be under 280 characters. Short, bold, and direct."
+        }[platform if platform in ["LinkedIn", "Email", "X"] else "LinkedIn"]
+
         prompt = f"""
-You are a strategic content writer at Trivance AI — a consultancy that helps small and mid-sized businesses adopt AI through logic, language, and systems.
+You are a strategic content writer at Trivance AI. Create a post for {platform} using a {post_style} tone.
 
-Write a ~175-word LinkedIn post based on the article below.
+Your goal:
+- Reference at least one specific detail from the summary
+- Reflect Trivance AI's logic-language-systems mindset
+- Follow this structure: Hook, Insight, Framing, Soft CTA
+- {platform_note}
 
-Your post must:
-- Hook readers with a sharp, strategic statement
-- Include at least **one clear idea, fact, or detail** from the article summary
-- Reflect the Trivance perspective: execution > hype
-- End with a soft CTA + 5-7 relevant hashtags
+Article:
+Title: {article.title}
+Source: {source}
+Link: {article.link}
+Summary: {article.summary}
 
-Example Trivance Post:
-Welcome to Trivance AI — your strategic partner for AI clarity and execution.
-
-We started Trivance with a simple insight:
-✦ Most small to mid-sized businesses don't need an AI overhaul.
-✦ They need a human guide to cut through the noise, spot real opportunities, and build smart, working solutions.
-
-Whether you're:
-● Looking to upskill your team with practical ChatGPT techniques
-● Or unsure where to even begin with low-lift AI in your business — we've got you.
-
-Our approach is grounded in ⬩ logic ⬩ language ⬩ systems — not buzzwords or overpromised solutions.
-We bring structure and strategy to the table, so you can move fast and confidently.
-
-Tone Style: {post_style}
-Style Guidelines: {style_info["description"]}
-Sentence Style: {style_info["sentence_style"]}
-
-CRITICAL: Include at least one specific detail from the summary below. Do not generalize — anchor your insight in the actual content.
-
-Article Input:
-- Title: {article.title}
-- Summary: {article.summary}
-- Source: {article.source}
-- Link: {article.link}
-
-Key insights to potentially reference: {key_insights}
-
-Return clean, final LinkedIn-ready text (including hashtags at the bottom).
+Insights you may use: {insights}
 """
+        # Log request start time
+        start_time = time.time()
+        print(f"🚀 Starting OpenAI API call at {time.strftime('%H:%M:%S')}")
         
-        # Use newer OpenAI API format
-        try:
-            # Try new API first
-            from openai import OpenAI
-            client = OpenAI(api_key=OPENAI_API_KEY)
-            
-            response = client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": f"You are a professional content writer for Trivance AI, skilled at creating engaging LinkedIn posts with a {post_style} tone that incorporates specific details from article content."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=400,
-                temperature=0.7
-            )
-            
-            generated_content = response.choices[0].message.content.strip()
-            
-        except (ImportError, AttributeError):
-            # Fallback to old API format
-            response = openai.ChatCompletion.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": f"You are a professional content writer for Trivance AI, skilled at creating engaging LinkedIn posts with a {post_style} tone."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=400,
-                temperature=0.7
-            )
-            
-            generated_content = response.choices[0].message.content.strip()
+        completion = client.chat.completions.create(
+            model="gpt-3.5-turbo",  # Use faster, cheaper model
+            messages=[
+                {"role": "system", "content": "You're a strategic copywriter for Trivance AI."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=400,  # Reduced tokens
+            temperature=0.7,
+            timeout=60  # 60 second timeout
+        )
         
-        hashtags = generate_hashtags(article.title, article.summary)
+        # Log completion time and duration
+        end_time = time.time()
+        duration = end_time - start_time
+        print(f"🏁 OpenAI API call completed in {duration:.2f}s")
         
+        # Flag as potential hang if >30s
+        if duration > 30:
+            print(f"⚠️ API call took longer than expected ({duration:.2f}s > 30s)")
+        
+        # Validate response
+        if not completion or not completion.choices:
+            print("⚠️  Empty response from OpenAI")
+            return {
+                "error": "Empty response from OpenAI",
+                "fallback": True
+            }
+        
+        text = completion.choices[0].message.content
+        if not text or not text.strip():
+            print("⚠️  Empty content in OpenAI response")
+            return {
+                "error": "Empty content in OpenAI response", 
+                "fallback": True
+            }
+        
+        text = text.strip()
+        
+        # Enhanced success criteria check
+        if len(text) > 50:  # Minimum viable post length
+            print(f"✅ OpenAI generation successful! ({len(text)} characters)")
+        else:
+            print(f"⚠️ OpenAI response may be incomplete ({len(text)} characters)")
+            return {
+                "error": f"Response too short ({len(text)} characters)",
+                "fallback": True
+            }
+        
+        # Log token usage if available
+        if hasattr(completion, 'usage') and completion.usage:
+            prompt_tokens = completion.usage.prompt_tokens
+            completion_tokens = completion.usage.completion_tokens
+            total_tokens = completion.usage.total_tokens
+            print(f"📊 Token usage: {prompt_tokens} prompt + {completion_tokens} completion = {total_tokens} total")
+        else:
+            print("📊 Token usage information not available")
+        if platform == "LinkedIn":
+            text += f"\n\n{generate_hashtags(article.title + ' ' + article.summary)}"
+
+        # Store successful generation in content vault
+        if content_vault:
+            vault_metadata = {
+                "method": "openai_gpt",
+                "style_used": post_style,
+                "platform": platform,
+                "generation_time": duration,
+                "token_usage": {
+                    "prompt_tokens": getattr(completion.usage, 'prompt_tokens', 0) if hasattr(completion, 'usage') else 0,
+                    "completion_tokens": getattr(completion.usage, 'completion_tokens', 0) if hasattr(completion, 'usage') else 0,
+                    "total_tokens": getattr(completion.usage, 'total_tokens', 0) if hasattr(completion, 'usage') else 0
+                }
+            }
+            content_vault.store_successful_post(article.title, text, vault_metadata)
+
         return {
-            "post": generated_content,
+            "post": text,
             "method": "openai_gpt",
-            "hashtags": hashtags,
             "prompt_used": prompt,
             "style_used": post_style,
-            "key_insights": key_insights
+            "platform": platform,
+            "key_insights": insights
         }
         
-    except ImportError:
+    except ImportError as e:
+        print(f"📦 OpenAI library not available: {e}")
         return {
-            "error": "OpenAI library not installed. Run: pip install openai",
+            "error": f"OpenAI library not available: {e}",
             "fallback": True
         }
     except Exception as e:
+        print(f"🚨 OpenAI generation failed: {str(e)}")
+        print(f"🔍 Error type: {type(e).__name__}")
         return {
             "error": f"OpenAI generation failed: {str(e)}",
             "fallback": True
         }
 
-def generate_template_based(article, post_style: str = "consultative") -> Dict[str, Any]:
-    """
-    Generate content using template-based approach with style control.
-    Uses actual article content and applies proper style formatting.
-    """
-    hashtags = generate_hashtags(article.title, article.summary)
-    key_insights = extract_key_insights(article.summary)
-    style_info = STYLE_EXAMPLES.get(post_style, STYLE_EXAMPLES["consultative"])
-    
-    # Extract a specific detail from the summary to include
-    specific_detail = ""
-    if key_insights:
-        specific_detail = key_insights[0].replace("Key stat: ", "").replace("Key finding: ", "").replace("Quote: ", "")
-    elif article.summary:
-        # Fallback: use first meaningful sentence from summary
-        sentences = [s.strip() for s in article.summary.split('.') if len(s.strip()) > 20]
-        if sentences:
-            specific_detail = sentences[0]
-    
-    # Style-specific templates
-    if post_style == "punchy":
-        templates = [
-            {
-                "hook": "🚨 {title}.",
-                "insight": "Here's what everyone's missing: {detail}",
-                "body": """The playbook is simple:
-• Map your current workflow
-• Find the bottlenecks  
-• Apply AI precisely where it matters
+def generate_template_based(article, post_style="trivance_default", platform="LinkedIn") -> Dict[str, Any]:
+    insights = extract_key_insights(article.summary)
+    detail = insights[0].split(":", 1)[-1].strip() if insights else article.summary[:160]
+    hashtags = generate_hashtags(article.title + " " + article.summary) if platform == "LinkedIn" else ""
+    source = article.source.strip() or "RSS Feeds"
 
-Stop chasing shiny tools. Start fixing real problems.""",
-                "cta": "Ready to cut through the noise?"
-            },
-            {
-                "hook": "💥 {title}.",
-                "insight": "The truth? {detail}",
-                "body": """Most teams get this backwards:
-• They buy AI tools first
-• Then figure out what to do with them
-• Wonder why results disappoint
+    hook = f"🔍 {article.title}"
+    body = f"""Here's a specific takeaway: {detail}
 
-Smart approach: Problems first. Tools second.""",
-                "cta": "Time to flip the script?"
-            }
-        ]
-    
-    elif post_style == "casual":
-        templates = [
-            {
-                "hook": "📰 Just read this: {title}",
-                "insight": "Here's what caught my attention: {detail}",
-                "body": """You know what I love about this? It's exactly what we see with our clients.
+At Trivance AI, we believe in ⬩ logic ⬩ language ⬩ systems — because smart AI adoption is structured, not scattered.
 
-The companies that succeed with AI aren't the ones with the biggest budgets. They're the ones who:
-• Start with clear problems
-• Test small and learn fast  
-• Focus on their team's actual workflows
+Want a strategy that sticks?
 
-It's not rocket science, but it works.""",
-                "cta": "What's your take on this?"
-            },
-            {
-                "hook": "� Interesting perspective: {title}",
-                "insight": "This resonates: {detail}",
-                "body": """Think of it this way — AI is like hiring a really smart intern.
-
-You wouldn't just give them access to everything and say "figure it out." You'd:
-• Show them your current process
-• Give them specific tasks to improve
-• Check their work and iterate
-
-Same principle applies to AI tools.""",
-                "cta": "Makes sense, right?"
-            }
-        ]
-    
-    else:  # consultative (default)
-        templates = [
-            {
-                "hook": "🎯 {title} — here's the strategic insight:",
-                "insight": "The key finding: {detail}",
-                "body": """This aligns with what we see across SMBs implementing AI successfully.
-
-The pattern is consistent:
-✦ They start with process mapping, not tool shopping
-✦ They focus on high-impact, low-complexity wins first
-✦ They invest in team training alongside technology
-
-At Trivance AI, we call this ⬩ logic ⬩ language ⬩ systems — because sustainable AI adoption requires all three.""",
-                "cta": "Ready to build your AI strategy on solid foundations?"
-            },
-            {
-                "hook": "📊 {title} — and the implications are clear:",
-                "insight": "Consider this: {detail}",
-                "body": """Smart businesses recognize that AI implementation isn't about replacing humans — it's about amplifying human capabilities.
-
-The framework that works:
-✦ Identify repetitive tasks that drain team energy
-✦ Map existing workflows before adding automation
-✦ Choose tools that integrate with current systems
-
-This isn't about transformation. It's about intelligent optimization.""",
-                "cta": "What's your next optimization opportunity?"
-            }
-        ]
-    
-    # Select template based on title length for variation
-    template_index = len(article.title) % len(templates)
-    template = templates[template_index]
-    
-    # Build the post content
-    hook = template["hook"].format(title=article.title)
-    insight = template["insight"].format(detail=specific_detail[:100] + "..." if len(specific_detail) > 100 else specific_detail)
-    
-    post_content = f"""{hook}
-
-{insight}
-
-{template["body"]}
-
-{template["cta"]}
-
-Source: {article.source}
-{article.link if article.link else ''}
+Source: {source}
+{article.link}
 
 {hashtags}"""
-    
+
     return {
-        "post": post_content.strip(),
-        "method": "template_based",
-        "hashtags": hashtags,
-        "template_used": template_index,
+        "post": f"{hook}\n\n{body.strip()}",
+        "method": "template",
+        "platform": platform,
+        "hashtags_included": bool(hashtags),
         "style_used": post_style,
-        "key_insights": key_insights,
-        "specific_detail": specific_detail
+        "key_insights": insights
     }
 
-def generate_commentary(article, post_style: str = "consultative"):
-    """
-    Generate Trivance AI-aligned LinkedIn content using the article as inspiration.
-    
-    Args:
-        article: Article object with title, summary, source, link
-        post_style: Style of the post ("consultative", "punchy", "casual")
-    
-    Uses OpenAI GPT if configured (USE_OPENAI_GPT=true and OPENAI_API_KEY set),
-    otherwise falls back to template-based generation.
-    """
-    
-    # Validate post_style
-    if post_style not in STYLE_EXAMPLES:
-        post_style = "consultative"
+def generate_commentary(article, post_style="trivance_default", platform="LinkedIn"):
+    print(f"🔧 generate_commentary called with USE_GPT={USE_GPT}, API_KEY={'set' if OPENAI_API_KEY else 'missing'}")
     
     if USE_GPT and OPENAI_API_KEY:
-        result = generate_with_openai(article, post_style)
+        print("🤖 Attempting OpenAI generation...")
+        result = generate_with_openai(article, post_style, platform)
         
-        # If GPT generation failed, fall back to template
-        if result.get("fallback") or result.get("error"):
-            print(f"GPT generation failed: {result.get('error', 'Unknown error')}")
-            print("Falling back to template-based generation...")
-            return generate_template_based(article, post_style)
+        # Enhanced fallback logic - only fallback on actual failures
+        if result.get("error") or result.get("fallback"):
+            error_msg = result.get('error', 'Unknown error')
+            print(f"🔄 OpenAI failed, using template fallback: {error_msg}")
+            
+            # Log the specific failure reason for monitoring
+            failure_type = "timeout" if "timeout" in error_msg.lower() else "api_error"
+            print(f"📊 Failure type: {failure_type}")
+            
+            return generate_template_based(article, post_style, platform)
         
+        # Success case - log and return
+        print("✅ OpenAI generation completed successfully!")
         return result
-    
     else:
-        # Use template-based generation
-        return generate_template_based(article, post_style)
+        print("📋 Using template generation (OpenAI disabled)")
+        return generate_template_based(article, post_style, platform)
 
-# Utility function to get available styles
 def get_available_styles() -> Dict[str, str]:
-    """Return available post styles with descriptions."""
-    return {style: info["description"] for style, info in STYLE_EXAMPLES.items()}
+    return {k: v["description"] for k, v in STYLE_EXAMPLES.items()}

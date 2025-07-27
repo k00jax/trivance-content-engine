@@ -2,35 +2,24 @@
 
 ## Environment Variables
 
-### OpenAI GPT Integration (Optional)
+### OpenAI GPT Integration (✅ CONFIGURED)
 
-To enable OpenAI GPT-powered content generation:
+OpenAI GPT-powered content generation is now **ENABLED**:
 
-1. **Install OpenAI library:**
+1. **✅ OpenAI library installed:**
    ```bash
    pip install openai
    ```
 
-2. **Set environment variables:**
-   ```bash
-   # Windows (Command Prompt)
-   set USE_OPENAI_GPT=true
-   set OPENAI_API_KEY=your-api-key-here
-
-   # Windows (PowerShell)
-   $env:USE_OPENAI_GPT="true"
-   $env:OPENAI_API_KEY="your-api-key-here"
-
-   # Linux/Mac
-   export USE_OPENAI_GPT=true
-   export OPENAI_API_KEY=your-api-key-here
-   ```
-
-3. **Or create a `.env` file:**
+2. **✅ Environment variables configured in `.env` file:**
    ```
    USE_OPENAI_GPT=true
    OPENAI_API_KEY=your-api-key-here
    ```
+
+3. **✅ Dependencies added to requirements.txt:**
+   - `python-dotenv` for environment variable loading
+   - `openai>=1.0.0` for GPT integration
 
 ### Fallback Behavior
 

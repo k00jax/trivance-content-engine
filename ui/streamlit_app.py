@@ -271,28 +271,8 @@ with tabs[1]:
             tool_col1, tool_col2 = st.columns(2)
             
             with tool_col1:
-                if st.button("🏷️ GENERATE HASHTAGS", use_container_width=True):
-                    try:
-                        with st.spinner("Generating relevant hashtags..."):
-                            hashtag_prompt = f"Based on this post, suggest 3–8 unique and trending hashtags relevant to AI, business strategy, and small business enablement:\n\n{edited_post}"
-                            
-                            # Call hashtag generation (assuming we have this endpoint)
-                            hashtag_res = requests.post(
-                                f"{API_URL}/posts/hashtags", 
-                                json={"content": edited_post}
-                            )
-                            
-                            if hashtag_res.status_code == 200:
-                                hashtags = hashtag_res.json().get("hashtags", [])
-                                hashtag_text = "\n\n" + " ".join([f"#{tag}" for tag in hashtags])
-                                st.session_state.generated_post = edited_post + hashtag_text
-                                st.success("✅ Hashtags added!")
-                                st.rerun()
-                            else:
-                                st.warning("Hashtag generation not available yet")
-                                
-                    except requests.RequestException:
-                        st.warning("Hashtag generation service unavailable")
+                # Hashtags are now included automatically in the generated post
+                st.info("✨ Hashtags are automatically included in generated posts")
             
             with tool_col2:
                 if st.button("🖼️ GENERATE MEDIA", use_container_width=True):
