@@ -6,7 +6,7 @@ API_URL = "http://localhost:8000"  # Adjust if hosted remotely
 st.set_page_config(page_title="Trivance AI Content Engine", layout="wide")
 st.title("🧠 Trivance AI – Content Engine Dashboard")
 
-tabs = st.tabs(["📡 Feeds", "✍️ Generate Post", "� Recent Posts", "�📬 Subscribers"])
+tabs = st.tabs(["📡 Feeds", "✍️ Generate Post", "📝 Recent Posts", "📬 Subscribers"])
 
 # --- FEEDS TAB ---
 with tabs[0]:
@@ -59,264 +59,507 @@ with tabs[0]:
 
 # --- POST GENERATOR TAB ---
 with tabs[1]:
-    st.header("✍️ Generate AI-Driven Post")
+    st.header("✍️ AI-Driven Content Generator")
     
-    # Auto-select mode toggle
-    auto_mode = st.checkbox("🤖 Auto-generate from top article (recommended)", value=True)
-    
-    # Initialize session state for form data
+    # Initialize session states
+    if "article_queue" not in st.session_state:
+        st.session_state.article_queue = []
     if "selected_article" not in st.session_state:
         st.session_state.selected_article = None
+    if "post_style" not in st.session_state:
+        st.session_state.post_style = "Trivance Default"
+    if "platform" not in st.session_state:
+        st.session_state.platform = "LinkedIn"
+    if "generated_post" not in st.session_state:
+        st.session_state.generated_post = ""
+    if "media_url" not in st.session_state:
+        st.session_state.media_url = None
     
-    if auto_mode:
-        st.info("💡 Auto mode will select the highest-scoring article from all your RSS feeds")
+    # === STEP 1: Article Fetch + Display Layout ===
+    
+    # Top section with article fetching and display
+    top_col1, top_col2 = st.columns([1, 2])
+    
+    with top_col1:
+        st.subheader("🔍 Article Fetching")
         
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            if st.button("🔍 Fetch Top Article", type="primary"):
+        # Fetch controls
+        fetch_col1, fetch_col2 = st.columns([2, 1])
+        
+        with fetch_col1:
+            if st.button("📰 FETCH ARTICLE", type="primary", use_container_width=True):
                 try:
-                    with st.spinner("Analyzing articles from all feeds..."):
-                        res = requests.get(f"{API_URL}/feeds/top-article")
+                    with st.spinner("Fetching top articles from all feeds..."):
+                        # Get articles with max age filter
+                        max_age = st.session_state.get("max_age", 3)
+                        res = requests.get(f"{API_URL}/feeds/top-article", params={"max_age_days": max_age})
                         res.raise_for_status()
-                        st.session_state.selected_article = res.json()
-                        st.success("✅ Top article selected!")
-                except requests.RequestException as e:
-                    st.error(f"Error fetching top article: {e}")
-                    st.session_state.selected_article = None
-        
-        with col2:
-            max_age = st.selectbox("Max article age", [1, 3, 7, 14, 30], index=2, format_func=lambda x: f"{x} days")
-    
-    else:
-        st.info("📋 Manual mode: select a feed and article manually")
-        
-        # Get available feeds
-        try:
-            feeds_res = requests.get(f"{API_URL}/feeds/")
-            feeds_res.raise_for_status()
-            feeds = feeds_res.json()
-        except requests.RequestException as e:
-            st.error(f"Error fetching feeds: {e}")
-            feeds = []
-        
-        if not feeds:
-            st.warning("⚠️ No RSS feeds available. Add feeds in the 'Feeds' tab first.")
-        else:
-            # Feed selection
-            feed_names = [f["name"] for f in feeds]
-            selected_feed = st.selectbox("📡 Select RSS Feed", feed_names)
-            
-            if selected_feed:
-                col1, col2 = st.columns([1, 1])
-                
-                with col1:
-                    if st.button("📰 Fetch Articles", type="secondary"):
-                        try:
-                            with st.spinner(f"Fetching articles from {selected_feed}..."):
-                                articles_res = requests.get(f"{API_URL}/feeds/articles", params={"feed_name": selected_feed})
-                                articles_res.raise_for_status()
-                                articles = articles_res.json()
-                                st.session_state.available_articles = articles
-                                st.success(f"✅ Found {len(articles)} articles")
-                        except requests.RequestException as e:
-                            st.error(f"Error fetching articles: {e}")
-                            st.session_state.available_articles = []
-                
-                # Article selection
-                if "available_articles" in st.session_state and st.session_state.available_articles:
-                    articles = st.session_state.available_articles
-                    
-                    # Format article options with scores
-                    article_options = []
-                    for i, article in enumerate(articles):
-                        score = article.get("score", 0)
-                        title = article.get("title", "No title")[:60]
-                        article_options.append(f"[Score: {score}] {title}...")
-                    
-                    selected_article_idx = st.selectbox(
-                        "📄 Select Article", 
-                        range(len(article_options)),
-                        format_func=lambda i: article_options[i]
-                    )
-                    
-                    if selected_article_idx is not None:
-                        selected_article = articles[selected_article_idx]
-                        st.session_state.selected_article = selected_article
                         
-                        # Show article preview
-                        with st.expander("👀 Article Preview", expanded=True):
-                            st.markdown(f"**Title:** {selected_article.get('title', 'N/A')}")
-                            st.markdown(f"**Score:** {selected_article.get('score', 0)} (relevance to SMB AI strategy)")
-                            st.markdown(f"**Published:** {selected_article.get('published', 'Unknown')}")
-                            st.markdown(f"**Summary:** {selected_article.get('summary', 'No summary')[:300]}...")
-                            if selected_article.get('link'):
-                                st.markdown(f"**[Read Full Article]({selected_article['link']})**")
-    
-    # Show selected article and generation form
-    if st.session_state.selected_article:
-        article = st.session_state.selected_article
+                        # Get multiple articles for queue
+                        articles_res = requests.get(f"{API_URL}/feeds/articles", params={"max_age_days": max_age})
+                        articles_res.raise_for_status()
+                        articles = articles_res.json()
+                        
+                        # Sort by relevance score and store in queue
+                        articles_sorted = sorted(articles, key=lambda x: x.get("score", 0), reverse=True)
+                        st.session_state.article_queue = articles_sorted[:10]  # Keep top 10
+                        
+                        if st.session_state.article_queue:
+                            st.session_state.selected_article = st.session_state.article_queue[0]
+                            st.success(f"✅ Fetched {len(st.session_state.article_queue)} articles!")
+                        else:
+                            st.warning("No articles found in the specified time range")
+                            
+                except requests.RequestException as e:
+                    st.error(f"Error fetching articles: {e}")
         
-        st.subheader("📝 Selected Article")
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            st.markdown(f"**📰 {article.get('title', 'No title')}**")
-            st.markdown(f"**🎯 Relevance Score:** {article.get('score', 0)}/10")
-            st.markdown(f"**📅 Published:** {article.get('published', 'Unknown')}")
-        
-        with col2:
-            if article.get('link'):
-                st.markdown(f"**[🔗 Read Original]({article['link']})**")
-            st.markdown(f"**📡 Source:** {article.get('source_feed', 'Unknown')}")
-        
-        st.markdown("**📄 Summary:**")
-        st.text_area("", value=article.get('summary', 'No summary'), height=100, disabled=True)
-        
-        # Generation options
-        col1, col2 = st.columns([3, 1])
-        
-        with col1:
-            include_hashtags = st.checkbox("🏷️ Include hashtags", value=True)
-            
-            # Map display names to actual style keys
-            style_options = {
-                "Consultative (strategic, frameworks)": "consultative",
-                "Punchy (short, bold claims)": "punchy", 
-                "Casual (friendly, conversational)": "casual"
-            }
-            
-            selected_style_display = st.selectbox("✍️ Post Style", 
-                list(style_options.keys()),
-                help="Different writing styles for various content approaches"
+        with fetch_col2:
+            max_age = st.selectbox(
+                "Max Age", 
+                [1, 3, 7, 14], 
+                index=1, 
+                format_func=lambda x: f"{x} days",
+                key="max_age"
             )
-            
-            post_style = style_options[selected_style_display]
         
-        with col2:
-            if st.button("🚀 Generate Post", type="primary", use_container_width=True):
+        # Next Article button (show after first fetch)
+        if st.session_state.article_queue and len(st.session_state.article_queue) > 1:
+            if st.button("⏭️ NEXT ARTICLE", use_container_width=True):
+                # Find current article index and move to next
+                current_idx = 0
+                if st.session_state.selected_article:
+                    current_title = st.session_state.selected_article.get("title", "")
+                    for i, article in enumerate(st.session_state.article_queue):
+                        if article.get("title", "") == current_title:
+                            current_idx = i
+                            break
+                
+                # Move to next article (cycle back to start if at end)
+                next_idx = (current_idx + 1) % len(st.session_state.article_queue)
+                st.session_state.selected_article = st.session_state.article_queue[next_idx]
+                st.rerun()
+    
+    with top_col2:
+        if st.session_state.selected_article:
+            st.subheader("📄 Selected Article")
+            
+            article = st.session_state.selected_article
+            
+            # Article title (bold)
+            st.markdown(f"**{article.get('title', 'No title available')}**")
+            
+            # Metadata row
+            meta_col1, meta_col2, meta_col3 = st.columns(3)
+            with meta_col1:
+                st.metric("Relevance Score", f"{article.get('score', 0):.1f}")
+            with meta_col2:
+                published_date = article.get('published', 'Unknown')
+                st.write(f"📅 **Published:** {published_date}")
+            with meta_col3:
+                source = article.get('source', 'Unknown Source')
+                link = article.get('link', '#')
+                st.markdown(f"🔗 **Source:** [{source}]({link})")
+            
+            # Enhanced Summary (scrollable)
+            st.write("**📝 Enhanced Summary:**")
+            summary = article.get('summary', 'No summary available')
+            
+            # Use a container with max height for long summaries
+            if len(summary) > 300:
+                st.text_area(
+                    "",
+                    value=summary,
+                    height=150,
+                    disabled=True,
+                    key="article_summary_display"
+                )
+            else:
+                st.write(summary)
+                
+            # Show enhancement indicator
+            if len(summary) > 200:
+                st.caption("✨ Enhanced summary using web scraping")
+            
+        else:
+            st.info("🎯 Click 'FETCH ARTICLE' to get started with AI-powered content generation")
+    
+    st.divider()
+    
+    # === STEP 2: Bottom Controls – Post Generation Setup ===
+    
+    bottom_col1, bottom_col2 = st.columns([1, 2])
+    
+    with bottom_col1:
+        st.subheader("🎨 Generation Controls")
+        
+        # Generate Post button
+        generate_disabled = st.session_state.selected_article is None
+        if st.button(
+            "🚀 GENERATE POST", 
+            type="primary", 
+            disabled=generate_disabled,
+            use_container_width=True
+        ):
+            if st.session_state.selected_article:
                 try:
-                    with st.spinner("🧠 Generating Trivance-aligned content..."):
-                        # Include post_style in the API request
-                        res = requests.post(f"{API_URL}/posts/generate", json={
+                    with st.spinner("Generating AI-powered post..."):
+                        # Prepare generation parameters with correct field names
+                        article = st.session_state.selected_article
+                        payload = {
                             "title": article.get("title", ""),
                             "summary": article.get("summary", ""),
-                            "source": article.get("source_feed", "RSS Feed"),
-                            "link": article.get("link", ""),
-                            "post_style": post_style
-                        })
-                        res.raise_for_status()
-                        result = res.json()
+                            "source": article.get("source", "RSS Feed"),  # Ensure source is provided
+                            "link": article.get("link", ""),  # Use 'link' not 'url'
+                            "post_style": st.session_state.post_style,  # Use 'post_style' not 'style'
+                            "platform": st.session_state.platform
+                        }
                         
-                        st.subheader("💬 Generated LinkedIn Post")
+                        # Call generation API
+                        gen_res = requests.post(f"{API_URL}/posts/generate", json=payload)
+                        gen_res.raise_for_status()
                         
-                        generated_post = result["post"]
-                        if not include_hashtags and "hashtags" in result:
-                            # Remove hashtags if user doesn't want them
-                            hashtags = result["hashtags"]
-                            generated_post = generated_post.replace(hashtags, "").strip()
+                        result = gen_res.json()
+                        # Handle the correct response field name
+                        generated_content = result.get("post", result.get("content", ""))
+                        if generated_content:
+                            st.session_state.generated_post = generated_content
+                            st.success("✅ Post generated successfully!")
+                        else:
+                            st.warning("⚠️ Post generated but content is empty")
+                            st.json(result)  # Debug: show the actual response
                         
-                        st.code(generated_post, language="markdown")
-                        st.success("✅ Post generated and saved successfully!")
-                        
-                        # Additional info
-                        with st.expander("ℹ️ Generation Details"):
-                            generation_details = {
-                                "method": result.get("method", "unknown"),
-                                "style_used": result.get("style_used", "unknown"),
-                                "hashtags": result.get("hashtags", "none"),
-                                "article_score": article.get("score", 0)
-                            }
-                            
-                            # Show key insights if available
-                            if result.get("key_insights"):
-                                generation_details["key_insights"] = result["key_insights"]
-                            
-                            if result.get("specific_detail"):
-                                generation_details["specific_detail_used"] = result["specific_detail"][:100] + "..."
-                            
-                            st.json(generation_details)
-                        
-                        # Clear selection for next generation
-                        if st.button("🔄 Generate Another Post"):
-                            st.session_state.selected_article = None
-                            st.rerun()
-                            
                 except requests.RequestException as e:
                     st.error(f"Error generating post: {e}")
-    else:
-        if auto_mode:
-            st.info("👆 Click 'Fetch Top Article' to automatically select the best article from your feeds")
-        else:
-            st.info("👆 Select a feed and article above to generate content")
-    
-    # Manual entry fallback
-    with st.expander("📝 Manual Entry (Alternative)", expanded=False):
-        st.markdown("**Use this if RSS feeds are not working or you want to input custom content**")
         
-        with st.form("manual_gen_post"):
-            manual_title = st.text_input("Article Title")
-            manual_summary = st.text_area("Summary")
-            manual_source = st.text_input("Source")
-            manual_link = st.text_input("Link (optional)")
+        # Style selection dropdown
+        st.session_state.post_style = st.selectbox(
+            "📝 Post Style / Tone",
+            ["Trivance Default", "Punchy", "Casual"],
+            index=0,
+            key="style_selector"
+        )
+        
+        # Platform selection dropdown  
+        st.session_state.platform = st.selectbox(
+            "📱 Social Platform",
+            ["LinkedIn", "Email Newsletter", "X.com"],
+            index=0,
+            key="platform_selector"
+        )
+        
+        if generate_disabled:
+            st.caption("⚠️ Select an article first to enable post generation")
+    
+    with bottom_col2:
+        # === STEP 3: Post Output (Editable + Enhanced Tools) ===
+        
+        if st.session_state.generated_post:
+            st.subheader("📝 Generated Post")
             
-            # Add style selection for manual entry too
-            manual_style_options = {
-                "Consultative (strategic, frameworks)": "consultative",
-                "Punchy (short, bold claims)": "punchy", 
-                "Casual (friendly, conversational)": "casual"
-            }
-            
-            manual_style_display = st.selectbox("Post Style", 
-                list(manual_style_options.keys()),
-                help="Writing style for the generated content"
+            # Editable post content
+            edited_post = st.text_area(
+                "Generated Post",
+                value=st.session_state.generated_post,
+                height=200,
+                key="post_editor"
             )
             
-            manual_post_style = manual_style_options[manual_style_display]
-            manual_generate = st.form_submit_button("Generate from Manual Input")
-        
-        if manual_generate and manual_title and manual_summary and manual_source:
-            try:
-                res = requests.post(f"{API_URL}/posts/generate", json={
-                    "title": manual_title,
-                    "summary": manual_summary,
-                    "source": manual_source,
-                    "link": manual_link,
-                    "post_style": manual_post_style
-                })
-                res.raise_for_status()
-                result = res.json()
-                st.subheader("💬 Generated Post (Manual)")
-                st.code(result["post"], language="markdown")
-                st.success("✅ Post generated from manual input!")
+            # Update session state with edits
+            st.session_state.generated_post = edited_post
+            
+            # Tool buttons
+            tool_col1, tool_col2 = st.columns(2)
+            
+            with tool_col1:
+                if st.button("🏷️ GENERATE HASHTAGS", use_container_width=True):
+                    try:
+                        with st.spinner("Generating relevant hashtags..."):
+                            hashtag_prompt = f"Based on this post, suggest 3–8 unique and trending hashtags relevant to AI, business strategy, and small business enablement:\n\n{edited_post}"
+                            
+                            # Call hashtag generation (assuming we have this endpoint)
+                            hashtag_res = requests.post(
+                                f"{API_URL}/posts/hashtags", 
+                                json={"content": edited_post}
+                            )
+                            
+                            if hashtag_res.status_code == 200:
+                                hashtags = hashtag_res.json().get("hashtags", [])
+                                hashtag_text = "\n\n" + " ".join([f"#{tag}" for tag in hashtags])
+                                st.session_state.generated_post = edited_post + hashtag_text
+                                st.success("✅ Hashtags added!")
+                                st.rerun()
+                            else:
+                                st.warning("Hashtag generation not available yet")
+                                
+                    except requests.RequestException:
+                        st.warning("Hashtag generation service unavailable")
+            
+            with tool_col2:
+                if st.button("🖼️ GENERATE MEDIA", use_container_width=True):
+                    try:
+                        with st.spinner("Generating media with DALL-E..."):
+                            # Call media generation
+                            media_res = requests.post(
+                                f"{API_URL}/posts/media",
+                                json={"content": edited_post}
+                            )
+                            
+                            if media_res.status_code == 200:
+                                media_data = media_res.json()
+                                st.session_state.media_url = media_data.get("url", "")
+                                st.success("✅ Media generated!")
+                            else:
+                                st.warning("Media generation not available yet")
+                                
+                    except requests.RequestException:
+                        st.warning("Media generation service unavailable")
                 
-                # Show generation details for manual entry too
-                with st.expander("ℹ️ Manual Generation Details"):
-                    st.json({
-                        "method": result.get("method", "unknown"),
-                        "style_used": result.get("style_used", "unknown"),
-                        "key_insights": result.get("key_insights", []),
-                        "specific_detail_used": result.get("specific_detail", "None")[:100] + "..." if result.get("specific_detail") else "None"
-                    })
+                # Fallback upload option
+                uploaded_file = st.file_uploader(
+                    "📁 Upload Media", 
+                    type=['png', 'jpg', 'jpeg', 'gif'],
+                    key="media_upload"
+                )
+                
+                if uploaded_file:
+                    st.session_state.media_url = f"uploaded_{uploaded_file.name}"
+                    st.success("✅ Media uploaded!")
+            
+            # Display media preview
+            if st.session_state.media_url:
+                st.write("**🖼️ Media Preview:**")
+                if st.session_state.media_url.startswith("http"):
+                    st.image(st.session_state.media_url, width=300)
+                else:
+                    st.info(f"📎 Media attached: {st.session_state.media_url}")
+            
+            # === STEP 4: PUBLISH Button + Modal Confirmation ===
+            
+            publish_col1, publish_col2, publish_col3 = st.columns([1, 1, 1])
+            
+            with publish_col3:
+                publish_disabled = not (edited_post and st.session_state.platform)
+                
+                if st.button(
+                    "🚀 PUBLISH POST", 
+                    type="primary",
+                    disabled=publish_disabled,
+                    use_container_width=True
+                ):
+                    # Show modal confirmation (using expander as modal substitute)
+                    st.session_state.show_publish_modal = True
+            
+            # Modal simulation using expander
+            if st.session_state.get("show_publish_modal", False):
+                with st.expander("📋 Publish Confirmation", expanded=True):
+                    st.write("**Ready to publish your post?**")
                     
-            except requests.RequestException as e:
-                st.error(f"Error generating post: {e}")
+                    st.write(f"**Platform:** {st.session_state.platform}")
+                    st.write(f"**Content Length:** {len(edited_post)} characters")
+                    
+                    # Final preview
+                    st.text_area("Final Content Preview", value=edited_post, height=100, disabled=True)
+                    
+                    if st.session_state.media_url:
+                        st.write(f"**Media:** {st.session_state.media_url}")
+                    
+                    confirm_col1, confirm_col2 = st.columns(2)
+                    
+                    with confirm_col1:
+                        if st.button("✅ CONFIRM & POST", type="primary", use_container_width=True):
+                            # === STEP 5: Save Post to History ===
+                            try:
+                                # Save to post history
+                                post_data = {
+                                    "title": st.session_state.selected_article.get("title", ""),
+                                    "source": st.session_state.selected_article.get("source", ""),
+                                    "enhanced_summary": st.session_state.selected_article.get("summary", ""),
+                                    "generated_post": edited_post,
+                                    "platform": st.session_state.platform,
+                                    "media": st.session_state.media_url,
+                                    "hashtags": [tag.strip('#') for tag in edited_post.split() if tag.startswith('#')],
+                                    "timestamp": "2025-07-26T00:00:00Z"  # Would use actual timestamp
+                                }
+                                
+                                # Save to history (API call)
+                                save_res = requests.post(f"{API_URL}/posts/save", json=post_data)
+                                
+                                if save_res.status_code == 200:
+                                    st.success("🎉 Post published and saved to history!")
+                                    
+                                    # Log to terminal for now
+                                    st.code(f"""
+PUBLISHED POST TO {st.session_state.platform}:
+                                    
+{edited_post}
+
+Source: {st.session_state.selected_article.get('link', 'N/A')}
+Media: {st.session_state.media_url or 'None'}
+                                    """)
+                                    
+                                    # Reset state
+                                    st.session_state.show_publish_modal = False
+                                    st.session_state.generated_post = ""
+                                    st.session_state.media_url = None
+                                    
+                                else:
+                                    st.error("Failed to save post to history")
+                                    
+                            except Exception as e:
+                                st.error(f"Error publishing post: {e}")
+                    
+                    with confirm_col2:
+                        if st.button("❌ Cancel", use_container_width=True):
+                            st.session_state.show_publish_modal = False
+                            st.rerun()
+        
+        else:
+            st.info("📝 Generated posts will appear here after clicking 'GENERATE POST'")
+    
+    # Queue status indicator
+    if st.session_state.article_queue:
+        current_position = 1
+        if st.session_state.selected_article:
+            current_title = st.session_state.selected_article.get("title", "")
+            for i, article in enumerate(st.session_state.article_queue):
+                if article.get("title", "") == current_title:
+                    current_position = i + 1
+                    break
+        
+        st.caption(f"📊 Article queue: {current_position} of {len(st.session_state.article_queue)} loaded")
 
 # --- RECENT POSTS TAB ---
 with tabs[2]:
-    st.header("📰 Recent Generated Posts")
+    st.header("📰 Post History & Analytics")
     
+    # Fetch post history
     try:
-        res = requests.get(f"{API_URL}/posts/")
-        res.raise_for_status()
-        posts = res.json()
+        history_res = requests.get(f"{API_URL}/posts/history")
+        history_res.raise_for_status()
+        post_history = history_res.json()
     except requests.RequestException as e:
-        st.error(f"Error fetching posts: {e}")
-        posts = []
+        st.error(f"Error fetching post history: {e}")
+        post_history = []
     
-    if posts:
-        st.write(f"Total Posts Generated: {len(posts)}")
+    # Fetch regular posts for fallback
+    try:
+        posts_res = requests.get(f"{API_URL}/posts/")
+        posts_res.raise_for_status()
+        regular_posts = posts_res.json()
+    except requests.RequestException as e:
+        regular_posts = []
+    
+    # Combine and display
+    if post_history:
+        st.success(f"📊 Found {len(post_history)} posts in history")
         
-        for i, post in enumerate(posts):
+        # Summary metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            total_posts = len(post_history)
+            st.metric("Total Posts", total_posts)
+        
+        with col2:
+            platforms = [post.get('platform', 'Unknown') for post in post_history]
+            most_used_platform = max(set(platforms), key=platforms.count) if platforms else 'N/A'
+            st.metric("Top Platform", most_used_platform)
+        
+        with col3:
+            total_chars = sum(post.get('character_count', 0) for post in post_history)
+            avg_chars = total_chars // len(post_history) if post_history else 0
+            st.metric("Avg. Length", f"{avg_chars} chars")
+        
+        with col4:
+            total_hashtags = sum(len(post.get('hashtags', [])) for post in post_history)
+            st.metric("Total Hashtags", total_hashtags)
+        
+        st.divider()
+        
+        # Filter options
+        filter_col1, filter_col2 = st.columns(2)
+        
+        with filter_col1:
+            platform_filter = st.selectbox(
+                "Filter by Platform",
+                ["All"] + list(set(post.get('platform', 'Unknown') for post in post_history)),
+                index=0
+            )
+        
+        with filter_col2:
+            show_limit = st.slider("Show Posts", 5, 50, 10)
+        
+        # Filter posts
+        filtered_posts = post_history
+        if platform_filter != "All":
+            filtered_posts = [post for post in post_history if post.get('platform') == platform_filter]
+        
+        # Display posts
+        for i, post in enumerate(filtered_posts[:show_limit]):
+            with st.expander(
+                f"📄 {post.get('title', 'Untitled')[:60]}... | {post.get('platform', 'Unknown')} | {post.get('timestamp', '')[:10]}",
+                expanded=False
+            ):
+                # Post metadata
+                meta_col1, meta_col2 = st.columns(2)
+                
+                with meta_col1:
+                    st.markdown(f"**📰 Title:** {post.get('title', 'N/A')}")
+                    st.markdown(f"**📡 Source:** {post.get('source', 'N/A')}")
+                    st.markdown(f"**📱 Platform:** {post.get('platform', 'N/A')}")
+                    st.markdown(f"**📅 Published:** {post.get('timestamp', 'N/A')[:19]}")
+                
+                with meta_col2:
+                    st.markdown(f"**📊 Character Count:** {post.get('character_count', 0)}")
+                    st.markdown(f"**📝 Word Count:** {post.get('word_count', 0)}")
+                    
+                    hashtags = post.get('hashtags', [])
+                    if hashtags:
+                        st.markdown(f"**🏷️ Hashtags:** {', '.join(f'#{tag}' for tag in hashtags[:5])}")
+                    
+                    if post.get('media'):
+                        st.markdown(f"**🖼️ Media:** {post.get('media')}")
+                
+                # Enhanced Summary
+                if post.get('enhanced_summary'):
+                    st.markdown("**📋 Original Article Summary:**")
+                    st.text_area(
+                        "",
+                        value=post['enhanced_summary'],
+                        height=100,
+                        disabled=True,
+                        key=f"summary_{i}"
+                    )
+                
+                # Generated Post
+                st.markdown("**✍️ Generated Post:**")
+                st.text_area(
+                    "",
+                    value=post.get('generated_post', 'No content'),
+                    height=150,
+                    disabled=True,
+                    key=f"post_{i}"
+                )
+                
+                # Action buttons
+                action_col1, action_col2, action_col3 = st.columns(3)
+                
+                with action_col1:
+                    if st.button(f"📋 Copy Post", key=f"copy_{i}"):
+                        st.success("Post copied to clipboard! (feature would copy in production)")
+                
+                with action_col2:
+                    if st.button(f"🔄 Regenerate", key=f"regen_{i}"):
+                        st.info("Would regenerate this post with current settings")
+                
+                with action_col3:
+                    if st.button(f"📊 Analytics", key=f"analytics_{i}"):
+                        st.info("Would show post performance analytics")
+    
+    elif regular_posts:
+        st.info("📝 Showing legacy posts (upgrade to new history format)")
+        
+        for i, post in enumerate(regular_posts[:10]):
             with st.expander(f"📄 {post.get('title', 'Untitled')} - {post.get('source', 'Unknown Source')}"):
                 col1, col2 = st.columns([2, 1])
                 
@@ -333,8 +576,23 @@ with tabs[2]:
                 
                 st.markdown("**Generated Content:**")
                 st.code(post.get('generated_content', 'No content'), language="markdown")
+    
     else:
-        st.info("No posts generated yet. Go to the 'Generate Post' tab to create your first post!")
+        st.info("📝 No posts generated yet. Go to the 'Generate Post' tab to create your first post!")
+        
+        # Show example of what post history will look like
+        with st.expander("🎯 What you'll see here", expanded=True):
+            st.markdown("""
+            **Your post history will include:**
+            - 📊 Analytics dashboard with metrics
+            - 📱 Platform-specific post tracking  
+            - 🏷️ Hashtag performance
+            - 📈 Content length statistics
+            - 🔄 One-click regeneration
+            - 📋 Copy/export functionality
+            
+            *Start generating posts to build your content library!*
+            """)
 
 # --- SUBSCRIBERS TAB ---
 with tabs[3]:

@@ -25,21 +25,24 @@ def delete_feed(name: str):
     return remove_feed(name)
 
 @router.get("/articles")
-def get_articles(feed_name: str, limit: Optional[int] = 10):
+def get_articles(feed_name: Optional[str] = None, limit: Optional[int] = 10):
     """
-    Get articles from a specific feed by name.
-    Returns articles with title, summary, link, published date, and relevance score.
+    Get articles from one feed or all feeds if feed_name is not provided.
     """
     try:
-        articles = get_articles_by_feed_name(feed_name, limit)
+        if feed_name:
+            articles = get_articles_by_feed_name(feed_name, limit)
+        else:
+            from app.services.rss import feeds_db, fetch_articles_from_feed
+            articles = []
+            for feed in feeds_db:
+                articles.extend(fetch_articles_from_feed(feed["url"], limit))
         if not articles:
-            raise HTTPException(
-                status_code=404, 
-                detail=f"No articles found for feed '{feed_name}' or feed does not exist"
-            )
+            raise HTTPException(status_code=404, detail="No articles found.")
         return articles
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching articles: {str(e)}")
+
 
 @router.get("/top-article")
 def get_top_article(max_age_days: Optional[int] = 7):
