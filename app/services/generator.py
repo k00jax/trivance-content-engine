@@ -184,6 +184,18 @@ def generate_with_openai(article, post_style="trivance_default", platform="Linke
                 """)
                 
                 logging.info(f"OpenAI API request sent for article: {clean_title[:50]}...")
+                import json
+
+                prompt_length = len(prompt)
+                logging.info(f"⏱ Prompt length: {prompt_length} characters")
+                logging.info(f"⏱ Prompt sample (first 500 chars):\n{prompt[:500]}")
+
+                # Also validate the message object
+                message_payload = [
+                    {"role": "system", "content": "You are a strategic..."},
+                    {"role": "user", "content": prompt}
+                ]
+                logging.info("Message payload JSON size:", len(json.dumps(message_payload)))
 
                 completion = openai.ChatCompletion.create(
                     model="gpt-3.5-turbo",
