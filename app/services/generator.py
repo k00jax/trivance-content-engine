@@ -24,11 +24,6 @@ STYLE_EXAMPLES = {
         "description": "Professional, clear, consultative, and educational",
         "sentence_style": "Balanced and strategic, avoids fluff",
         "example_phrases": [
-            "Consider this:",
-            "Smart businesses recognize",
-            "The framework that works:",
-            "This isn't about transformation. It's about intelligent optimization.",
-            "What's your next optimization opportunity?"
         ],
         "hooks": [
             "📊 {title} — and the implications are clear:",
@@ -192,7 +187,7 @@ def generate_with_openai(article, post_style="trivance_default", platform="Linke
                 completion = openai.ChatCompletion.create(
                     model="gpt-3.5-turbo",
                     messages=[
-                        {"role": "system", "content": "You're a strategic copywriter for Trivance AI."},
+                        {"role": "system", "content": "You are a strategic, human-sounding content writer for Trivance AI. You write posts that are specific, business-relevant, and NEVER use clichés like 'consider this' or 'smart businesses recognize.'"},
                         {"role": "user", "content": prompt}
                     ],
                     max_tokens=400,
