@@ -1,6 +1,9 @@
 import os
 import re
 import time
+import html
+import logging
+import threading
 from typing import Dict, Any, Optional
 
 # Import content vault for storing successful generations
@@ -11,130 +14,200 @@ except ImportError:
 
 USE_GPT = os.getenv("USE_OPENAI_GPT", "false").lower() == "true"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+DEBUG_GPT_RESPONSE = os.getenv("DEBUG_GPT_RESPONSE", "false").lower() == "true"
 
 STYLE_EXAMPLES = {
     "trivance_default": {
         "description": "Professional, clear, consultative, and educational",
         "sentence_style": "Balanced and strategic, avoids fluff",
         "example_phrases": [
-            "Strategic insight",
-            "Execution > hype",
-            "Mapped workflows",
-            "Smart systems",
-            "Clear frameworks"
+            "Consider this:",
+            "Smart businesses recognize",
+            "The framework that works:",
+            "This isn't about transformation. It's about intelligent optimization.",
+            "What's your next optimization opportunity?"
+        ],
+        "hooks": [
+            "📊 {title} — and the implications are clear:",
+            "🎯 {title} — but here's what most teams miss:",
+            "💡 {title} — and it reveals something important:",
+            "⚡ {title} — the timing couldn't be better:"
         ]
     },
     "punchy": {
-        "description": "Short, bold, scroll-stopping",
-        "sentence_style": "One-liners, hooks, shock and clarity",
-        "example_phrases": ["Here's the truth:", "Stop doing this:", "What most miss:"]
+        "description": "Direct, action-oriented, and energetic",
+        "sentence_style": "Short, impactful statements with clear calls to action",
+        "example_phrases": [
+            "Here's the reality:",
+            "Bottom line:",
+            "The result?",
+            "Time to act.",
+            "What's your move?"
+        ],
+        "hooks": [
+            "🚀 {title} — game changer alert!",
+            "💥 {title} — this changes everything:",
+            "⚡ {title} — action required:",
+            "🎯 {title} — opportunity knocking:"
+        ]
     },
     "casual": {
-        "description": "Friendly, analogy-driven, accessible",
-        "sentence_style": "Conversational, uses metaphors",
-        "example_phrases": ["Think of it this way:", "It's like this:", "You know what I've noticed?"]
+        "description": "Conversational, approachable, and relatable",
+        "sentence_style": "Natural flow with personal touches and accessible language",
+        "example_phrases": [
+            "Think about it:",
+            "Here's what's interesting:",
+            "I've been thinking about this:",
+            "Worth considering:",
+            "What do you think?"
+        ],
+        "hooks": [
+            "🤔 {title} — got me thinking:",
+            "💭 {title} — here's my take:",
+            "🗣️ {title} — let's talk about this:",
+            "👀 {title} — worth your attention:"
+        ]
     }
 }
 
-def extract_key_insights(summary: str, max_insights: int = 3) -> list:
-    if not summary:
-        return []
+def extract_key_insights(text: str) -> list:
+    """Extract key insights from article text for content generation."""
+    if not text:
+        return ["No content available for analysis"]
     
+    sentences = text.split('. ')
     insights = []
-    stat_pattern = r'\b\d+(?:\.\d+)?%|\b\d+(?:,\d{3})*(?:\.\d+)?\s*(?:million|billion|thousand|percent|%)\b'
-    quotes = re.findall(r'"([^"]+)"', summary)
-    stats = re.findall(stat_pattern, summary.lower())
-    insights += [f"Stat: {stat}" for stat in stats[:2]]
-    insights += [f"Quote: {quote}" for quote in quotes[:1]]
-
-    important_keywords = [
-        'reveals', 'found', 'discovered', 'study', 'research', 'announced',
-        'launched', 'released', 'introduced', 'accelerated', 'resistance', 'compliance'
-    ]
-    for sentence in summary.split('.')[:6]:
-        if any(k in sentence.lower() for k in important_keywords):
-            insights.append(f"Finding: {sentence.strip()}")
-        if len(insights) >= max_insights:
-            break
-
-    return insights[:max_insights]
+    
+    for sentence in sentences[:5]:
+        if len(sentence) > 30 and any(word in sentence.lower() for word in 
+            ['ai', 'business', 'company', 'technology', 'data', 'growth', 'innovation', 'market']):
+            insights.append(f"Key insight: {sentence.strip()}")
+    
+    return insights if insights else [f"Summary: {text[:200]}..."]
 
 def generate_hashtags(text: str) -> str:
-    base_tags = ["#AI", "#TrivanceAI", "#SmallBusiness"]
-    topics = {
-        "chatgpt": "#ChatGPT", "gpt": "#GPT", "automation": "#Automation",
-        "startup": "#Startup", "efficiency": "#Efficiency", "scale": "#Scaling",
-        "leadership": "#Leadership", "compliance": "#AIGovernance"
+    """Generate relevant hashtags based on content."""
+    hashtag_map = {
+        'ai': '#AI', 'artificial intelligence': '#AI',
+        'business': '#Business', 'company': '#Business',
+        'technology': '#Technology', 'tech': '#Technology',
+        'innovation': '#Innovation', 'growth': '#Growth',
+        'leadership': '#Leadership', 'strategy': '#Strategy',
+        'automation': '#Automation', 'digital': '#Digital',
+        'data': '#Data', 'analytics': '#Analytics'
     }
-    text = text.lower()
-    dynamic = [h for k, h in topics.items() if k in text]
-    return " ".join(list(dict.fromkeys(base_tags + dynamic))[:7])
+    
+    text_lower = text.lower()
+    found_tags = set()
+    
+    for keyword, hashtag in hashtag_map.items():
+        if keyword in text_lower:
+            found_tags.add(hashtag)
+    
+    # Always include Trivance AI tags
+    found_tags.update(['#TrivanceAI', '#SmallBusiness'])
+    
+    return ' '.join(list(found_tags)[:6])
 
 def generate_with_openai(article, post_style="trivance_default", platform="LinkedIn") -> Dict[str, Any]:
+    """Generate content using OpenAI GPT with timeout and enhanced error handling."""
     try:
         import openai
-
-        if not OPENAI_API_KEY:
-            return {
-                "error": "Missing OPENAI_API_KEY",
-                "fallback": True
-            }
-
-        client = openai.OpenAI(api_key=OPENAI_API_KEY)
-        style = STYLE_EXAMPLES.get(post_style, STYLE_EXAMPLES["trivance_default"])
-        source = article.source.strip() or "RSS Feeds"
-        insights = extract_key_insights(article.summary)
+        import threading
         
-        platform_note = {
-            "LinkedIn": "Include hashtags at the end.",
-            "Email": "No hashtags. Use subject line style tone.",
-            "X": "Post must be under 280 characters. Short, bold, and direct."
-        }[platform if platform in ["LinkedIn", "Email", "X"] else "LinkedIn"]
+        result = {"success": False, "error": None, "response": None}
+        
+        def api_call():
+            try:
+                client = openai.OpenAI(api_key=OPENAI_API_KEY)
+                style = STYLE_EXAMPLES.get(post_style, STYLE_EXAMPLES["trivance_default"])
+                source = article.source.strip() or "RSS Feeds"
+                
+                # Decode HTML entities before processing
+                clean_title = html.unescape(article.title) if article.title else ""
+                clean_summary = html.unescape(article.summary) if article.summary else ""
+                
+                insights = extract_key_insights(clean_summary)
+                
+                platform_note = {
+                    "LinkedIn": "Include hashtags at the end.",
+                    "Email": "No hashtags. Use subject line style tone.",
+                    "X": "Post must be under 280 characters. Short, bold, and direct."
+                }[platform if platform in ["LinkedIn", "Email", "X"] else "LinkedIn"]
 
-        prompt = f"""
-You are a strategic content writer at Trivance AI. Create a post for {platform} using a {post_style} tone.
+                prompt = f"""
+You are a strategic content writer at Trivance AI. Create an engaging {platform} post about this article using a {post_style} tone.
+
+CRITICAL: Avoid generic phrases like "Here's a specific takeaway:", "Consider this:", "Think about it:", or "Here's what's interesting:". Be specific and direct.
 
 Your goal:
-- Reference at least one specific detail from the summary
-- Reflect Trivance AI's logic-language-systems mindset
-- Follow this structure: Hook, Insight, Framing, Soft CTA
+- Reference specific data, names, or details from the summary
+- Reflect Trivance AI's logic-language-systems mindset  
+- Use this structure: Hook (engaging opener), Insight (specific detail), Framing (Trivance perspective), Soft CTA
 - {platform_note}
 
-Article:
-Title: {article.title}
+Article Details:
+Title: {clean_title}
 Source: {source}
 Link: {article.link}
-Summary: {article.summary}
+Summary: {clean_summary}
 
-Insights you may use: {insights}
+Key insights to potentially reference: {insights}
+
+Write a compelling, specific post that sounds natural and conversational, not templated.
 """
-        # Log request start time
+                
+                logging.info(f"OpenAI API request sent for article: {clean_title[:50]}...")
+                completion = client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "system", "content": "You're a strategic copywriter for Trivance AI."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=400,
+                    temperature=0.7
+                )
+                logging.info(f"OpenAI API response received successfully")
+                
+                result["success"] = True
+                result["response"] = completion
+                result["prompt"] = prompt
+                result["insights"] = insights
+                logging.info(f"OpenAI generation successful - tokens used: {completion.usage.total_tokens}")
+                
+            except Exception as e:
+                error_msg = f"OpenAI API error: {str(e)}"
+                logging.error(error_msg)
+                result["error"] = error_msg
+        
+        # Start API call in thread with timeout
         start_time = time.time()
-        print(f"🚀 Starting OpenAI API call at {time.strftime('%H:%M:%S')}")
+        thread = threading.Thread(target=api_call)
+        thread.daemon = True
+        thread.start()
+        thread.join(timeout=15)  # 15 second timeout
         
-        completion = client.chat.completions.create(
-            model="gpt-3.5-turbo",  # Use faster, cheaper model
-            messages=[
-                {"role": "system", "content": "You're a strategic copywriter for Trivance AI."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=400,  # Reduced tokens
-            temperature=0.7,
-            timeout=60  # 60 second timeout
-        )
+        duration = time.time() - start_time
         
-        # Log completion time and duration
-        end_time = time.time()
-        duration = end_time - start_time
-        print(f"🏁 OpenAI API call completed in {duration:.2f}s")
+        if thread.is_alive():
+            logging.error("⏰ OpenAI API call timed out after 15 seconds")
+            return {
+                "error": "API call timeout (15s)",
+                "fallback": True
+            }
         
-        # Flag as potential hang if >30s
-        if duration > 30:
-            print(f"⚠️ API call took longer than expected ({duration:.2f}s > 30s)")
+        if not result["success"]:
+            error_msg = result.get("error", "Unknown API error")
+            logging.error(f"🚨 OpenAI API error: {error_msg}")
+            return {
+                "error": f"API error: {error_msg}",
+                "fallback": True
+            }
         
-        # Validate response
+        # Process successful response
+        completion = result["response"]
         if not completion or not completion.choices:
-            print("⚠️  Empty response from OpenAI")
+            logging.error("❌ OpenAI returned empty response or no choices")
             return {
                 "error": "Empty response from OpenAI",
                 "fallback": True
@@ -142,7 +215,7 @@ Insights you may use: {insights}
         
         text = completion.choices[0].message.content
         if not text or not text.strip():
-            print("⚠️  Empty content in OpenAI response")
+            logging.error("❌ OpenAI returned empty content")
             return {
                 "error": "Empty content in OpenAI response", 
                 "fallback": True
@@ -150,28 +223,54 @@ Insights you may use: {insights}
         
         text = text.strip()
         
-        # Enhanced success criteria check
-        if len(text) > 50:  # Minimum viable post length
-            print(f"✅ OpenAI generation successful! ({len(text)} characters)")
-        else:
-            print(f"⚠️ OpenAI response may be incomplete ({len(text)} characters)")
+        # Debug mode: Log GPT response
+        if DEBUG_GPT_RESPONSE:
+            logging.info(f"[DEBUG] GPT Raw Output ({len(text)} chars):\n{text[:200]}{'...' if len(text) > 200 else ''}")
+        
+        # Check minimum length threshold
+        if len(text) < 50:
+            logging.error(f"❌ OpenAI response too short: {len(text)} characters")
             return {
                 "error": f"Response too short ({len(text)} characters)",
                 "fallback": True
             }
         
-        # Log token usage if available
-        if hasattr(completion, 'usage') and completion.usage:
-            prompt_tokens = completion.usage.prompt_tokens
-            completion_tokens = completion.usage.completion_tokens
-            total_tokens = completion.usage.total_tokens
-            print(f"📊 Token usage: {prompt_tokens} prompt + {completion_tokens} completion = {total_tokens} total")
-        else:
-            print("📊 Token usage information not available")
+        logging.info(f"✅ OpenAI generation successful! ({len(text)} characters, {duration:.2f}s)")
+        
+        # Verify this looks like AI-generated content (not template-like)
+        template_indicators = [
+            "Consider this:",
+            "Smart businesses recognize",
+            "The framework that works:",
+            "Here's a specific takeaway:",  # Added the problematic phrase
+            "Here's what's interesting:",
+            "Think about it:",
+            "✦ Identify",
+            "✦ Map", 
+            "✦ Choose"
+        ]
+        
+        if any(indicator in text for indicator in template_indicators):
+            logging.warning("⚠️ OpenAI response contains template-like patterns - possible content issue")
+            if DEBUG_GPT_RESPONSE:
+                logging.info(f"[DEBUG] Suspicious content detected:\n{text}")
+        
+        # Store generation metadata for debugging
+        generation_metadata = {
+            "prompt_length": len(result.get("prompt", "")),
+            "response_length": len(text),
+            "generation_time": duration,
+            "has_template_patterns": any(indicator in text for indicator in template_indicators)
+        }
+        
+        if DEBUG_GPT_RESPONSE:
+            logging.info(f"[DEBUG] Generation metadata: {generation_metadata}")
+        
+        # Add hashtags for LinkedIn
         if platform == "LinkedIn":
             text += f"\n\n{generate_hashtags(article.title + ' ' + article.summary)}"
 
-        # Store successful generation in content vault
+        # Store in content vault
         if content_vault:
             vault_metadata = {
                 "method": "openai_gpt",
@@ -189,76 +288,109 @@ Insights you may use: {insights}
         return {
             "post": text,
             "method": "openai_gpt",
-            "prompt_used": prompt,
+            "prompt_used": result["prompt"],
             "style_used": post_style,
             "platform": platform,
-            "key_insights": insights
+            "key_insights": result["insights"]
         }
         
     except ImportError as e:
-        print(f"📦 OpenAI library not available: {e}")
+        logging.error(f"📦 OpenAI library not available: {e}")
         return {
             "error": f"OpenAI library not available: {e}",
             "fallback": True
         }
     except Exception as e:
-        print(f"🚨 OpenAI generation failed: {str(e)}")
-        print(f"🔍 Error type: {type(e).__name__}")
+        logging.error(f"🚨 OpenAI generation failed: {str(e)}")
         return {
             "error": f"OpenAI generation failed: {str(e)}",
             "fallback": True
         }
 
 def generate_template_based(article, post_style="trivance_default", platform="LinkedIn") -> Dict[str, Any]:
-    insights = extract_key_insights(article.summary)
-    detail = insights[0].split(":", 1)[-1].strip() if insights else article.summary[:160]
-    hashtags = generate_hashtags(article.title + " " + article.summary) if platform == "LinkedIn" else ""
+    import random
+
+    # Decode HTML entities
+    clean_title = html.unescape(article.title or "")
+    clean_summary = html.unescape(article.summary or "")
     source = article.source.strip() or "RSS Feeds"
+    insights = extract_key_insights(clean_summary)
 
-    hook = f"🔍 {article.title}"
-    body = f"""Here's a specific takeaway: {detail}
+    # Synthesize 2–3 insights
+    selected_insights = insights[:3]
+    insight_text = " ".join(i.replace("Key insight:", "").strip() for i in selected_insights)
 
-At Trivance AI, we believe in ⬩ logic ⬩ language ⬩ systems — because smart AI adoption is structured, not scattered.
+    # Style selection
+    style = STYLE_EXAMPLES.get(post_style, STYLE_EXAMPLES["trivance_default"])
+    hook_template = random.choice(style["hooks"])
+    hook = hook_template.format(title=clean_title)
+    phrase = random.choice(style["example_phrases"])
 
-Want a strategy that sticks?
+    # Strategic framing
+    framing_options = [
+        "The takeaway for small teams? Prioritize high-leverage tools with low friction.",
+        "For leaders navigating AI, it's about choosing tools that reduce complexity — not add to it.",
+        "Execution matters more than exploration. Especially in environments where time is tight.",
+        "This underscores why clarity beats hype — and where practical automation creates momentum.",
+        "In the AI race, it’s not who’s first — it’s who’s actually effective."
+    ]
+    framing = random.choice(framing_options)
+
+    # Construct post
+    post = f"""{hook}
+
+{phrase} {insight_text}
+
+{framing}
 
 Source: {source}
-{article.link}
+{article.link}"""
 
-{hashtags}"""
+    # Add hashtags for social platforms only
+    if platform in ["LinkedIn", "X"]:
+        post += f"\n\n{generate_hashtags(clean_title + ' ' + clean_summary)}"
 
     return {
-        "post": f"{hook}\n\n{body.strip()}",
-        "method": "template",
-        "platform": platform,
-        "hashtags_included": bool(hashtags),
+        "post": post.strip(),
+        "method": "template_improved",
         "style_used": post_style,
-        "key_insights": insights
+        "platform": platform,
+        "key_insights": selected_insights
     }
 
+
 def generate_commentary(article, post_style="trivance_default", platform="LinkedIn"):
-    print(f"🔧 generate_commentary called with USE_GPT={USE_GPT}, API_KEY={'set' if OPENAI_API_KEY else 'missing'}")
+    logging.info(f"🔄 Starting content generation for: {article.title[:50]}...")
+    logging.info(f"   Style: {post_style}, Platform: {platform}, USE_GPT: {USE_GPT}")
     
     if USE_GPT and OPENAI_API_KEY:
-        print("🤖 Attempting OpenAI generation...")
+        logging.info("🤖 Attempting OpenAI generation...")
         result = generate_with_openai(article, post_style, platform)
         
-        # Enhanced fallback logic - only fallback on actual failures
-        if result.get("error") or result.get("fallback"):
-            error_msg = result.get('error', 'Unknown error')
-            print(f"🔄 OpenAI failed, using template fallback: {error_msg}")
+        # Check if we actually got an OpenAI response
+        if result.get("method") == "openai_gpt" and not result.get("error"):
+            logging.info("✅ OpenAI generation completed successfully!")
+            if DEBUG_GPT_RESPONSE:
+                content_preview = result.get("post", "")[:100] + "..." if len(result.get("post", "")) > 100 else result.get("post", "")
+                logging.info(f"[DEBUG] Final content preview: {content_preview}")
+            return result
+        else:
+            error_msg = result.get('error', 'Unknown OpenAI failure')
+            logging.error(f"❌ OpenAI failed: {error_msg}")
+            logging.warning("🔄 Falling back to template generation...")
             
-            # Log the specific failure reason for monitoring
-            failure_type = "timeout" if "timeout" in error_msg.lower() else "api_error"
-            print(f"📊 Failure type: {failure_type}")
-            
-            return generate_template_based(article, post_style, platform)
-        
-        # Success case - log and return
-        print("✅ OpenAI generation completed successfully!")
-        return result
+            # Add fallback metadata for tracking
+            fallback_result = generate_template_based(article, post_style, platform)
+            fallback_result["fallback_reason"] = error_msg
+            fallback_result["attempted_method"] = "openai_gpt"
+            return fallback_result
     else:
-        print("📋 Using template generation (OpenAI disabled)")
+        if not USE_GPT:
+            logging.info("📋 OpenAI disabled - using template generation")
+        elif not OPENAI_API_KEY:
+            logging.warning("🔑 No OpenAI API key - using template generation")
+        else:
+            logging.info("📋 Using template generation")
         return generate_template_based(article, post_style, platform)
 
 def get_available_styles() -> Dict[str, str]:
