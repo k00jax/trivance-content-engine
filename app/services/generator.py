@@ -154,26 +154,38 @@ def generate_with_openai(article, post_style="trivance_default", platform="Linke
                 }[platform if platform in ["LinkedIn", "Email", "X"] else "LinkedIn"]
 
                 prompt = f"""
-You are a strategic content writer at Trivance AI. Create an engaging {platform} post about this article using a {post_style} tone.
+                You are a strategic content writer at Trivance AI — a consultancy that helps small and mid-sized companies apply AI in practical, high-leverage ways.
 
-CRITICAL: Avoid generic phrases like "Here's a specific takeaway:", "Consider this:", "Think about it:", or "Here's what's interesting:". Be specific and direct.
+                Create an engaging {platform} post about this article using a {post_style} tone.
 
-Your goal:
-- Reference specific data, names, or details from the summary
-- Reflect Trivance AI's logic-language-systems mindset  
-- Use this structure: Hook (engaging opener), Insight (specific detail), Framing (Trivance perspective), Soft CTA
-- {platform_note}
+                **You MUST avoid** generic phrases like:
+                - “Consider this:”
+                - “Smart businesses recognize”
+                - “Here's what's interesting:”
+                These sound templated and generic. Do not use them.
 
-Article Details:
-Title: {clean_title}
-Source: {source}
-Link: {article.link}
-Summary: {clean_summary}
+                Instead:
+                - Reference specific features, technologies, or business problems from the article
+                - Explain where this tool could fit into a small/mid-sized org (e.g., HR, logistics, IT ops)
+                - Write like you’re speaking to a COO or Director of Ops — smart and time-conscious
+                - Keep the Trivance tone: clear, consultative, and outcome-driven
 
-Key insights to potentially reference: {insights}
+                Structure:
+                1. Hook (clear, relevant to the headline)
+                2. Specific insight (e.g. what this enables)
+                3. Strategic framing (why it matters, where it fits)
+                4. Soft CTA or reflection
 
-Write a compelling, specific post that sounds natural and conversational, not templated.
-"""
+                Article Details:
+                Title: {clean_title}
+                Source: {source}
+                Link: {article.link}
+                Summary: {clean_summary}
+
+                Key insights to optionally reference: {insights}
+
+                Final Reminder: Write like a strategist, not a marketer.
+                """
                 
                 logging.info(f"OpenAI API request sent for article: {clean_title[:50]}...")
 
