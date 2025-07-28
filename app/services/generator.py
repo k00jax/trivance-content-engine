@@ -5,6 +5,9 @@ import html
 import logging
 import threading
 from typing import Dict, Any, Optional
+import openai
+
+
 
 # Import content vault for storing successful generations
 try:
@@ -158,7 +161,8 @@ Write a compelling, specific post that sounds natural and conversational, not te
 """
                 
                 logging.info(f"OpenAI API request sent for article: {clean_title[:50]}...")
-                completion = client.chat.completions.create(
+
+                completion = openai.ChatCompletion.create(
                     model="gpt-3.5-turbo",
                     messages=[
                         {"role": "system", "content": "You're a strategic copywriter for Trivance AI."},
@@ -167,7 +171,8 @@ Write a compelling, specific post that sounds natural and conversational, not te
                     max_tokens=400,
                     temperature=0.7
                 )
-                logging.info(f"OpenAI API response received successfully")
+
+                logging.info("OpenAI API response received successfully")
                 
                 result["success"] = True
                 result["response"] = completion
