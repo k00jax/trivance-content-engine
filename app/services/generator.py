@@ -74,19 +74,34 @@ STYLE_EXAMPLES = {
 }
 
 def extract_key_insights(text: str) -> list:
-    """Extract key insights from article text for content generation."""
+    """Extract high-quality insights from article summary for content generation."""
     if not text:
         return ["No content available for analysis"]
-    
-    sentences = text.split('. ')
+
+    keywords = [
+        'ai', 'business', 'company', 'technology', 'data', 'growth', 'innovation',
+        'market', 'automate', 'optimize', 'platform', 'tools', 'reduce', 'efficiency',
+        'workflow', 'integration', 'model', 'system', 'assistant', 'productivity'
+    ]
+
+    # Clean and split into sentences
+    sentences = [s.strip() for s in text.split('. ') if len(s.strip()) > 30]
     insights = []
-    
-    for sentence in sentences[:5]:
-        if len(sentence) > 30 and any(word in sentence.lower() for word in 
-            ['ai', 'business', 'company', 'technology', 'data', 'growth', 'innovation', 'market']):
-            insights.append(f"Key insight: {sentence.strip()}")
-    
-    return insights if insights else [f"Summary: {text[:200]}..."]
+
+    for sentence in sentences:
+        lower = sentence.lower()
+        if any(k in lower for k in keywords) and not sentence.endswith("..."):
+            insights.append(f"Key insight: {sentence}")
+        if len(insights) >= 3:
+            break
+
+    # If weak insights, return fallback
+    if not insights:
+        short = text[:240].strip().rstrip(".") + "..."
+        return [f"Summary: {short}"]
+
+    return insights
+
 
 def generate_hashtags(text: str) -> str:
     """Generate relevant hashtags based on content."""
